@@ -28,6 +28,8 @@ import (
 	ucconfig "github.com/role-organizado/backend-go-role-organizado/internal/usecase/config"
 	// Phase 2
 	ucauth "github.com/role-organizado/backend-go-role-organizado/internal/usecase/auth"
+	// Phase 3
+	ucevent "github.com/role-organizado/backend-go-role-organizado/internal/usecase/event"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -121,6 +123,33 @@ func main() {
 		getUsuarioUC, updateUsuarioUC, listUsuariosUC, updateRoleUC,
 	)
 
+	// --- Phase 3: Events & Drafts domain repositories ---
+	eventoRepo := mongodb.NewEventoRepository(mongoClient)
+	draftRepo := mongodb.NewEventoDraftRepository(mongoClient)
+
+	// --- Phase 3: Events domain use cases ---
+	createEventoUC := ucevent.NewCreateEvento(eventoRepo)
+	getEventoUC := ucevent.NewGetEvento(eventoRepo)
+	listEventosUC := ucevent.NewListEventos(eventoRepo)
+	updateEventoUC := ucevent.NewUpdateEvento(eventoRepo)
+	deleteEventoUC := ucevent.NewDeleteEvento(eventoRepo)
+
+	// --- Phase 3: Drafts domain use cases ---
+	createDraftUC := ucevent.NewCreateDraft(draftRepo)
+	getDraftUC := ucevent.NewGetDraft(draftRepo)
+	listDraftsUC := ucevent.NewListDrafts(draftRepo)
+	updateDraftUC := ucevent.NewUpdateDraft(draftRepo)
+	deleteDraftUC := ucevent.NewDeleteDraft(draftRepo)
+	publishDraftUC := ucevent.NewPublishDraft(draftRepo, eventoRepo)
+
+	// --- Phase 3: HTTP Handlers ---
+	eventoHandler := handler.NewEventHandler(
+		createEventoUC, getEventoUC, listEventosUC, updateEventoUC, deleteEventoUC,
+	)
+	draftHandler := handler.NewDraftHandler(
+		createDraftUC, getDraftUC, listDraftsUC, updateDraftUC, deleteDraftUC, publishDraftUC,
+	)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -143,6 +172,8 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.JWTAuth(jwtSvc, publicPrefixes))
 		usuarioHandler.RegisterRoutes(r)
+		eventoHandler.RegisterEventRoutes(r)
+		draftHandler.RegisterDraftRoutes(r)
 	})
 
 	// --- HTTP server ---
