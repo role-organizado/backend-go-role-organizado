@@ -22,7 +22,7 @@ type rateioItemDocument struct {
 
 type eventoDraftDocument struct {
 	ID        bson.ObjectID `bson:"_id,omitempty"`
-	UsuarioID string        `bson:"usuario_id"`
+	UsuarioID string        `bson:"usuarioId"` // camelCase: matches Java MongoDB schema
 
 	// Etapa 0
 	Nome      string     `bson:"nome"`
@@ -32,34 +32,34 @@ type eventoDraftDocument struct {
 	Local     string     `bson:"local"`
 
 	// Etapa 1
-	ConvidadosIDs      []string `bson:"convidados_ids"`
-	PoliticaConvidados string   `bson:"politica_convidados"`
-	LimiteConvidados   *int     `bson:"limite_convidados"`
+	ConvidadosIDs      []string `bson:"convidadosIds"` // camelCase: matches Java
+	PoliticaConvidados string   `bson:"politicaConvidados"`
+	LimiteConvidados   *int     `bson:"limiteConvidados"`
 
 	// Etapa 2
-	RateiosHabilitado  bool                 `bson:"rateios_habilitado"`
-	RateiosItens       []rateioItemDocument `bson:"rateios_itens"`
-	TipoDivisaoRateio  string               `bson:"tipo_divisao_rateio"`
+	RateiosHabilitado  bool                 `bson:"rateiosHabilitado"`
+	RateiosItens       []rateioItemDocument `bson:"rateiosItens"`
+	TipoDivisaoRateio  string               `bson:"tipoDivisaoRateio"`
 
 	// Etapa 3
-	PagamentosHabilitado bool       `bson:"pagamentos_habilitado"`
-	MetodosPagamento     []string   `bson:"metodos_pagamento"`
-	PrazoPagamento       *time.Time `bson:"prazo_pagamento"`
+	PagamentosHabilitado bool       `bson:"pagamentosHabilitado"`
+	MetodosPagamento     []string   `bson:"metodosPagamento"`
+	PrazoPagamento       *time.Time `bson:"prazoPagamento"`
 
 	// Etapa 4
-	RegrasCustomizadas   string `bson:"regras_customizadas"`
-	PoliticaCancelamento string `bson:"politica_cancelamento"`
+	RegrasCustomizadas   []string `bson:"regrasCustomizadas"`
+	PoliticaCancelamento string   `bson:"politicaCancelamento"`
 
 	// Wizard state
-	EtapaAtual      int   `bson:"etapa_atual"`
-	EtapasCompletas []int `bson:"etapas_completas"`
+	EtapaAtual      int   `bson:"etapaAtual"` // camelCase: matches Java MongoDB schema
+	EtapasCompletas []int `bson:"etapasCompletas"`
 
-	CriadoEm  time.Time `bson:"criado_em"`
-	UpdatedAt time.Time `bson:"updated_at"` // TTL index on this field (90 days)
+	CriadoEm    time.Time `bson:"criadoEm"`    // camelCase: required by schema validator
+	AtualizadoEm time.Time `bson:"atualizadoEm"` // camelCase: required + TTL index
 }
 
 // EventoDraftRepository implements portout.EventoDraftRepository using MongoDB.
-// The `eventos_draft` collection has a TTL index on `updated_at` (7776000s = 90 days).
+// The `eventos_draft` collection has a TTL index on `atualizadoEm` (7776000s = 90 days).
 type EventoDraftRepository struct {
 	col *mongo.Collection
 }
@@ -88,8 +88,8 @@ func (r *EventoDraftRepository) FindByID(ctx context.Context, id string) (*domai
 
 // FindByUsuarioID returns all drafts for the given user, sorted by last update.
 func (r *EventoDraftRepository) FindByUsuarioID(ctx context.Context, usuarioID string) ([]domain.EventoDraft, error) {
-	filter := bson.D{{Key: "usuario_id", Value: usuarioID}}
-	opts := options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}})
+	filter := bson.D{{Key: "usuarioId", Value: usuarioID}}
+	opts := options.Find().SetSort(bson.D{{Key: "atualizadoEm", Value: -1}})
 	cursor, err := r.col.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, apierr.Internal(err.Error())
@@ -110,6 +110,11 @@ func (r *EventoDraftRepository) FindByUsuarioID(ctx context.Context, usuarioID s
 func (r *EventoDraftRepository) Save(ctx context.Context, d *domain.EventoDraft) (*domain.EventoDraft, error) {
 	doc := draftToDoc(d)
 	doc.ID = bson.NewObjectID()
+	now := time.Now().UTC()
+	if doc.CriadoEm.IsZero() {
+		doc.CriadoEm = now
+	}
+	doc.AtualizadoEm = now
 	_, err := r.col.InsertOne(ctx, doc)
 	if err != nil {
 		return nil, apierr.Internal(err.Error())
@@ -126,6 +131,7 @@ func (r *EventoDraftRepository) Update(ctx context.Context, d *domain.EventoDraf
 	}
 	doc := draftToDoc(d)
 	doc.ID = oid
+	doc.AtualizadoEm = time.Now().UTC()
 	filter := bson.D{{Key: "_id", Value: oid}}
 	_, err = r.col.ReplaceOne(ctx, filter, doc)
 	if err != nil {
@@ -161,6 +167,24 @@ func draftFromDoc(doc eventoDraftDocument) domain.EventoDraft {
 			Quantidade: ri.Quantidade,
 		}
 	}
+	// Convert []string regrasCustomizadas back to string for domain model
+	var regrasStr string
+	if len(doc.RegrasCustomizadas) > 0 {
+		regrasStr = doc.RegrasCustomizadas[0]
+	}
+	// Ensure non-nil slices
+	convidadosIDs := doc.ConvidadosIDs
+	if convidadosIDs == nil {
+		convidadosIDs = []string{}
+	}
+	metodosPagamento := doc.MetodosPagamento
+	if metodosPagamento == nil {
+		metodosPagamento = []string{}
+	}
+	etapasCompletas := doc.EtapasCompletas
+	if etapasCompletas == nil {
+		etapasCompletas = []int{}
+	}
 	return domain.EventoDraft{
 		ID:                   doc.ID.Hex(),
 		UsuarioID:            doc.UsuarioID,
@@ -169,21 +193,21 @@ func draftFromDoc(doc eventoDraftDocument) domain.EventoDraft {
 		Data:                 doc.Data,
 		Descricao:            doc.Descricao,
 		Local:                doc.Local,
-		ConvidadosIDs:        doc.ConvidadosIDs,
+		ConvidadosIDs:        convidadosIDs,
 		PoliticaConvidados:   doc.PoliticaConvidados,
 		LimiteConvidados:     doc.LimiteConvidados,
 		RateiosHabilitado:    doc.RateiosHabilitado,
 		RateiosItens:         itens,
 		TipoDivisaoRateio:    doc.TipoDivisaoRateio,
 		PagamentosHabilitado: doc.PagamentosHabilitado,
-		MetodosPagamento:     doc.MetodosPagamento,
+		MetodosPagamento:     metodosPagamento,
 		PrazoPagamento:       doc.PrazoPagamento,
-		RegrasCustomizadas:   doc.RegrasCustomizadas,
+		RegrasCustomizadas:   regrasStr,
 		PoliticaCancelamento: doc.PoliticaCancelamento,
 		EtapaAtual:           doc.EtapaAtual,
-		EtapasCompletas:      doc.EtapasCompletas,
+		EtapasCompletas:      etapasCompletas,
 		CriadoEm:             doc.CriadoEm,
-		UpdatedAt:            doc.UpdatedAt,
+		UpdatedAt:            doc.AtualizadoEm,
 	}
 }
 
@@ -196,6 +220,26 @@ func draftToDoc(d *domain.EventoDraft) eventoDraftDocument {
 			Quantidade: ri.Quantidade,
 		}
 	}
+	// Ensure all slice fields are non-nil to satisfy MongoDB array schema
+	convidadosIDs := d.ConvidadosIDs
+	if convidadosIDs == nil {
+		convidadosIDs = []string{}
+	}
+	metodosPagamento := d.MetodosPagamento
+	if metodosPagamento == nil {
+		metodosPagamento = []string{}
+	}
+	etapasCompletas := d.EtapasCompletas
+	if etapasCompletas == nil {
+		etapasCompletas = []int{}
+	}
+	// regrasCustomizadas is stored as []string in MongoDB (Java compat) but domain uses string
+	var regrasCustomizadas []string
+	if d.RegrasCustomizadas != "" {
+		regrasCustomizadas = []string{d.RegrasCustomizadas}
+	} else {
+		regrasCustomizadas = []string{}
+	}
 	return eventoDraftDocument{
 		UsuarioID:            d.UsuarioID,
 		Nome:                 d.Nome,
@@ -203,20 +247,20 @@ func draftToDoc(d *domain.EventoDraft) eventoDraftDocument {
 		Data:                 d.Data,
 		Descricao:            d.Descricao,
 		Local:                d.Local,
-		ConvidadosIDs:        d.ConvidadosIDs,
+		ConvidadosIDs:        convidadosIDs,
 		PoliticaConvidados:   d.PoliticaConvidados,
 		LimiteConvidados:     d.LimiteConvidados,
 		RateiosHabilitado:    d.RateiosHabilitado,
 		RateiosItens:         itens,
 		TipoDivisaoRateio:    d.TipoDivisaoRateio,
 		PagamentosHabilitado: d.PagamentosHabilitado,
-		MetodosPagamento:     d.MetodosPagamento,
+		MetodosPagamento:     metodosPagamento,
 		PrazoPagamento:       d.PrazoPagamento,
-		RegrasCustomizadas:   d.RegrasCustomizadas,
+		RegrasCustomizadas:   regrasCustomizadas,
 		PoliticaCancelamento: d.PoliticaCancelamento,
 		EtapaAtual:           d.EtapaAtual,
-		EtapasCompletas:      d.EtapasCompletas,
+		EtapasCompletas:      etapasCompletas,
 		CriadoEm:             d.CriadoEm,
-		UpdatedAt:            d.UpdatedAt,
+		AtualizadoEm:         d.UpdatedAt,
 	}
 }

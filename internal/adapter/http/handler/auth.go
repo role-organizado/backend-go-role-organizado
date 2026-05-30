@@ -196,13 +196,12 @@ func (h *AuthHandler) Validate(w http.ResponseWriter, r *http.Request) {
 // @Success 204
 // @Router /api/auth/logout [post]
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	// Logout is idempotent — return 204 even when not authenticated
 	userID := middleware.UserIDFromContext(r.Context())
-	if userID == "" {
-		writeError(w, apierr.Unauthorized("não autenticado"))
-		return
-	}
-	if err := h.logout.Execute(r.Context(), userID); err != nil {
-		slog.WarnContext(r.Context(), "logout error", "error", err)
+	if userID != "" {
+		if err := h.logout.Execute(r.Context(), userID); err != nil {
+			slog.WarnContext(r.Context(), "logout error", "error", err)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

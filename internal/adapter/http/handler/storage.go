@@ -19,6 +19,17 @@ type StorageHandler struct {
 	deleteUC   portin.DeleteArquivoUseCase
 }
 
+// uploadResponse is the JSON response for a successful file upload.
+type uploadResponse struct {
+	ID          string `json:"id"`
+	OwnerID     string `json:"ownerId"`
+	Nome        string `json:"nome"`
+	ContentType string `json:"contentType"`
+	Tamanho     int64  `json:"tamanho"`
+	GridFSID    string `json:"gridFsId"`
+	CriadoEm   string `json:"criadoEm"`
+}
+
 // NewStorageHandler creates a new StorageHandler.
 func NewStorageHandler(
 	uploadUC portin.UploadArquivoUseCase,
@@ -73,7 +84,15 @@ func (h *StorageHandler) upload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, result)
+	writeJSON(w, http.StatusCreated, uploadResponse{
+		ID:          result.ID,
+		OwnerID:     result.OwnerID,
+		Nome:        result.NomeOriginal,
+		ContentType: result.ContentType,
+		Tamanho:     result.Tamanho,
+		GridFSID:    result.GridFSID,
+		CriadoEm:   result.CriadoEm.Format("2006-01-02T15:04:05Z07:00"),
+	})
 }
 
 // download handles GET /api/v1/files/{id}

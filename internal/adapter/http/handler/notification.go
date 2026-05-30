@@ -45,26 +45,31 @@ func NewNotificationHandler(
 }
 
 // RegisterNotificationRoutes registers notification routes on r (protected).
+// Uses flat routes (no r.Route nesting) to avoid trailing-slash redirect issues.
 func (h *NotificationHandler) RegisterNotificationRoutes(r chi.Router) {
-	r.Route("/api/notificacoes", func(r chi.Router) {
-		r.Get("/", h.list)
-		r.Get("/unread-count", h.countUnread)
-		r.Put("/marcar-todas-lidas", h.marcarTodas)
-		r.Post("/", h.create)
-		r.Get("/{id}", h.get)
-		r.Put("/{id}/lida", h.marcarLida)
-		r.Delete("/{id}", h.delete)
-	})
+	// Primary routes — no trailing slash (matches Java path convention)
+	r.Get("/api/notificacoes", h.list)
+	r.Post("/api/notificacoes", h.create)
+	r.Get("/api/notificacoes/unread-count", h.countUnread)
+	r.Get("/api/notificacoes/count-unread", h.countUnread) // Java-compat alias
+	r.Put("/api/notificacoes/marcar-todas-lidas", h.marcarTodas)
+	r.Patch("/api/notificacoes/marcar-todas-lidas", h.marcarTodas) // Java uses PATCH
+	r.Get("/api/notificacoes/{id}", h.get)
+	r.Put("/api/notificacoes/{id}/lida", h.marcarLida)
+	r.Patch("/api/notificacoes/{id}/marcar-lida", h.marcarLida) // Java-compat alias
+	r.Delete("/api/notificacoes/{id}", h.delete)
+
 	// v1 aliases
-	r.Route("/api/v1/notificacoes", func(r chi.Router) {
-		r.Get("/", h.list)
-		r.Get("/unread-count", h.countUnread)
-		r.Put("/marcar-todas-lidas", h.marcarTodas)
-		r.Post("/", h.create)
-		r.Get("/{id}", h.get)
-		r.Put("/{id}/lida", h.marcarLida)
-		r.Delete("/{id}", h.delete)
-	})
+	r.Get("/api/v1/notificacoes", h.list)
+	r.Post("/api/v1/notificacoes", h.create)
+	r.Get("/api/v1/notificacoes/unread-count", h.countUnread)
+	r.Get("/api/v1/notificacoes/count-unread", h.countUnread) // Java-compat alias
+	r.Put("/api/v1/notificacoes/marcar-todas-lidas", h.marcarTodas)
+	r.Patch("/api/v1/notificacoes/marcar-todas-lidas", h.marcarTodas) // Java uses PATCH
+	r.Get("/api/v1/notificacoes/{id}", h.get)
+	r.Put("/api/v1/notificacoes/{id}/lida", h.marcarLida)
+	r.Patch("/api/v1/notificacoes/{id}/marcar-lida", h.marcarLida) // Java-compat alias
+	r.Delete("/api/v1/notificacoes/{id}", h.delete)
 }
 
 func (h *NotificationHandler) list(w http.ResponseWriter, r *http.Request) {

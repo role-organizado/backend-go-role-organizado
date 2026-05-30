@@ -44,6 +44,10 @@ func (h *UsuarioHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/usuarios/{id}", h.GetByID)
 	r.Get("/api/v1/admin/usuarios", h.ListAll)
 	r.Put("/api/v1/admin/usuarios/{id}/roles", h.UpdateRole)
+
+	// Legacy path aliases — same API surface as Java backend for BFF compatibility
+	r.Get("/api/usuarios/{id}", h.GetByID)
+	r.Put("/api/usuarios/{id}", h.UpdateByID)
 }
 
 // ---- DTOs ----
@@ -145,6 +149,33 @@ func (h *UsuarioHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 func (h *UsuarioHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	u, err := h.getUsuario.Execute(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toUsuarioDetailResponse(*u))
+}
+
+// UpdateByID updates a user by ID (legacy path — Java compat for BFF).
+// Callers must own the resource; ownership is validated in the use case.
+func (h *UsuarioHandler) UpdateByID(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req updateUsuarioRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
+		return
+	}
+	in := portin.UpdateUsuarioInput{Nome: req.Nome, FotoPerfil: req.FotoPerfil}
+	if req.Telefone != nil {
+		in.Telefone = &auth.Telefone{DDI: req.Telefone.DDI, DDD: req.Telefone.DDD, Numero: req.Telefone.Numero, Tipo: req.Telefone.Tipo}
+	}
+	if req.Endereco != nil {
+		in.Endereco = &auth.Endereco{
+			Rua: req.Endereco.Rua, Numero: req.Endereco.Numero, Complemento: req.Endereco.Complemento,
+			Bairro: req.Endereco.Bairro, Cidade: req.Endereco.Cidade, Estado: req.Endereco.Estado, CEP: req.Endereco.CEP,
+		}
+	}
+	u, err := h.updateUsuario.Execute(r.Context(), id, in)
 	if err != nil {
 		writeError(w, err)
 		return

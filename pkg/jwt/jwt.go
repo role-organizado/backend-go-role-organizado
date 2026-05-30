@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	gojwt "github.com/golang-jwt/jwt/v5"
 )
 
@@ -86,6 +87,7 @@ func (s *Service) generateToken(userID, email, nome, telefone string, roles []st
 			Subject:   userID,
 			IssuedAt:  gojwt.NewNumericDate(now),
 			ExpiresAt: gojwt.NewNumericDate(now.Add(ttl)),
+			ID:        uuid.New().String(), // jti — ensures token uniqueness even for same-second logins
 		},
 	}
 

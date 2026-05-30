@@ -55,6 +55,7 @@ func (h *RateioHandler) RegisterRateioRoutes(r chi.Router) {
 	r.Put("/api/rateios/{id}", h.updateRateio)
 	r.Delete("/api/rateios/{id}", h.deleteRateio)
 	r.Get("/api/rateios/{id}/preview", h.previewRateio)
+	r.Get("/api/rateios/{id}/previa", h.previewRateio)  // Java-compat alias
 	r.Post("/api/rateios/{id}/fechar", h.fecharRateio)
 	r.Get("/api/rateios/{id}/fechamentos", h.getFechamentos)
 
@@ -65,6 +66,7 @@ func (h *RateioHandler) RegisterRateioRoutes(r chi.Router) {
 	r.Put("/api/v1/rateios/{id}", h.updateRateio)
 	r.Delete("/api/v1/rateios/{id}", h.deleteRateio)
 	r.Get("/api/v1/rateios/{id}/preview", h.previewRateio)
+	r.Get("/api/v1/rateios/{id}/previa", h.previewRateio)  // Java-compat alias
 	r.Post("/api/v1/rateios/{id}/fechar", h.fecharRateio)
 	r.Get("/api/v1/rateios/{id}/fechamentos", h.getFechamentos)
 }
@@ -74,6 +76,7 @@ func (h *RateioHandler) RegisterRateioRoutes(r chi.Router) {
 type createRateioRequest struct {
 	EventoID            string                    `json:"eventoId"`
 	Tipo                string                    `json:"tipo"`
+	Nome                string                    `json:"nome"`      // Java parity: accepts nome as primary name field
 	Descricao           string                    `json:"descricao"`
 	ValorTotal          float64                   `json:"valorTotal"`
 	NumeroParticipantes int                       `json:"numeroParticipantes"`
@@ -128,7 +131,7 @@ func (h *RateioHandler) createRateio(w http.ResponseWriter, r *http.Request) {
 		EventoID:            req.EventoID,
 		UsuarioID:           userID,
 		Tipo:                domain.TipoRateio(req.Tipo),
-		Descricao:           req.Descricao,
+		Descricao:           func() string { if req.Nome != "" { return req.Nome }; return req.Descricao }(),
 		ValorTotal:          req.ValorTotal,
 		NumeroParticipantes: req.NumeroParticipantes,
 		Itens:               itens,
@@ -253,6 +256,10 @@ func (h *RateioHandler) getFechamentos(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	// Ensure non-null response (nil slice serializes to null in Go)
+	if fechs == nil {
+		fechs = []domain.RateioFechamento{}
+	}
 	writeJSON(w, http.StatusOK, fechs)
 }
 
@@ -270,6 +277,7 @@ type rateioResponse struct {
 	ID                  string               `json:"id"`
 	EventoID            string               `json:"eventoId"`
 	UsuarioID           string               `json:"usuarioId"`
+	Nome                string               `json:"nome"`
 	Tipo                string               `json:"tipo"`
 	Status              string               `json:"status"`
 	Descricao           string               `json:"descricao"`
@@ -295,6 +303,7 @@ func rateioToResponse(r *domain.Rateio) rateioResponse {
 		ID:                  r.ID,
 		EventoID:            r.EventoID,
 		UsuarioID:           r.UsuarioID,
+		Nome:                r.Descricao, // Java parity: nome field aliases descricao
 		Tipo:                string(r.Tipo),
 		Status:              string(r.Status),
 		Descricao:           r.Descricao,

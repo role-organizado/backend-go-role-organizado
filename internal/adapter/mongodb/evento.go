@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -14,28 +15,26 @@ import (
 
 const colEventos = "eventos"
 
+// eventoDocument matches Java's MongoDB schema for the 'eventos' collection.
+// _id can be ObjectID (Go-created) or UUID binary (Java-created) — use interface{}.
 type eventoDocument struct {
-	ID                   bson.ObjectID `bson:"_id,omitempty"`
-	UsuarioID            string        `bson:"usuario_id"`
-	Nome                 string        `bson:"nome"`
-	Tipo                 string        `bson:"tipo"`
-	Data                 time.Time     `bson:"data"`
-	Descricao            string        `bson:"descricao"`
-	Local                string        `bson:"local"`
-	FotoURL              string        `bson:"foto_url"`
-	Status               string        `bson:"status"`
-	ConvidadosIDs        []string      `bson:"convidados_ids"`
-	PoliticaConvidados   string        `bson:"politica_convidados"`
-	LimiteConvidados     *int          `bson:"limite_convidados"`
-	RateiosHabilitado    bool          `bson:"rateios_habilitado"`
-	TipoDivisaoRateio    string        `bson:"tipo_divisao_rateio"`
-	PagamentosHabilitado bool          `bson:"pagamentos_habilitado"`
-	MetodosPagamento     []string      `bson:"metodos_pagamento"`
-	PrazoPagamento       *time.Time    `bson:"prazo_pagamento"`
-	RegrasCustomizadas   string        `bson:"regras_customizadas"`
-	PoliticaCancelamento string        `bson:"politica_cancelamento"`
-	CriadoEm            time.Time     `bson:"criado_em"`
-	UpdatedAt            time.Time     `bson:"updated_at"`
+	ID                   interface{} `bson:"_id,omitempty"`
+	Nome                 string      `bson:"nome"`
+	Tipo                 string      `bson:"tipo"`
+	DataInicio           time.Time   `bson:"data_inicio"`            // Java: data_inicio (not "data")
+	DataFim              *time.Time  `bson:"data_fim,omitempty"`
+	UsuarioIDResponsavel interface{} `bson:"usuario_id_responsavel"` // UUID binary in Java schema
+	Descricao            string      `bson:"descricao,omitempty"`
+	Local                string      `bson:"local,omitempty"`
+	Status               string      `bson:"status"`
+	LimiteConvidados     *int32      `bson:"limite_convidados,omitempty"`
+	PoliticaConvidados   string      `bson:"politica_convidados,omitempty"`
+	PoliticaCancelamento string      `bson:"politica_cancelamento,omitempty"`
+	RateiosHabilitado    bool        `bson:"rateios_habilitado,omitempty"`
+	PagamentosHabilitado bool        `bson:"pagamentos_habilitado,omitempty"`
+	ImageURL             string      `bson:"image_url,omitempty"`
+	CriadoEm            time.Time   `bson:"criado_em,omitempty"`
+	AtualizadoEm        time.Time   `bson:"atualizado_em,omitempty"` // Java: atualizado_em (not "updated_at")
 }
 
 // EventoRepository implements portout.EventoRepository using MongoDB.
@@ -48,14 +47,11 @@ func NewEventoRepository(client *Client) *EventoRepository {
 	return &EventoRepository{col: client.Collection(colEventos)}
 }
 
-// FindByID retrieves an event by its MongoDB ObjectID.
+// FindByID retrieves an event by its ID (handles ObjectID hex and UUID string).
 func (r *EventoRepository) FindByID(ctx context.Context, id string) (*domain.Evento, error) {
-	oid, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, apierr.NotFound("evento", id)
-	}
+	filter := parseIDToFilter(id)
 	var doc eventoDocument
-	if err := r.col.FindOne(ctx, bson.D{{Key: "_id", Value: oid}}).Decode(&doc); err != nil {
+	if err := r.col.FindOne(ctx, filter).Decode(&doc); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, apierr.NotFound("evento", id)
 		}
@@ -67,7 +63,7 @@ func (r *EventoRepository) FindByID(ctx context.Context, id string) (*domain.Eve
 
 // FindByUsuarioID paginates events belonging to the given user.
 func (r *EventoRepository) FindByUsuarioID(ctx context.Context, usuarioID string, page, pageSize int) ([]domain.Evento, int64, error) {
-	filter := bson.D{{Key: "usuario_id", Value: usuarioID}}
+	filter := bson.D{{Key: "usuario_id_responsavel", Value: uuidStringToBinary(usuarioID)}}
 	return r.findPaginated(ctx, filter, page, pageSize)
 }
 
@@ -82,7 +78,7 @@ func (r *EventoRepository) findPaginated(ctx context.Context, filter bson.D, pag
 		return nil, 0, apierr.Internal(err.Error())
 	}
 	skip := int64((page - 1) * pageSize)
-	opts := options.Find().SetSkip(skip).SetLimit(int64(pageSize)).SetSort(bson.D{{Key: "data", Value: -1}})
+	opts := options.Find().SetSkip(skip).SetLimit(int64(pageSize)).SetSort(bson.D{{Key: "data_inicio", Value: -1}})
 	cursor, err := r.col.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, 0, apierr.Internal(err.Error())
@@ -99,41 +95,75 @@ func (r *EventoRepository) findPaginated(ctx context.Context, filter bson.D, pag
 	return eventos, total, nil
 }
 
-// Save inserts a new event and returns it with the generated ID.
+// Save inserts a new event. Uses UUID binary for _id (matches Java schema); stores usuario_id_responsavel as UUID binary.
 func (r *EventoRepository) Save(ctx context.Context, e *domain.Evento) (*domain.Evento, error) {
-	doc := eventoToDoc(e)
-	doc.ID = bson.NewObjectID()
-	_, err := r.col.InsertOne(ctx, doc)
-	if err != nil {
+	// Use UUID binary for _id so that the ID can be used as binData in rateio.evento_id
+	newID := uuidStringToBinary(uuid.New().String())
+	now := time.Now().UTC()
+	status := string(e.Status)
+	if status == "" {
+		status = "CONFIRMADO"
+	}
+	doc := eventoDocument{
+		ID:                   newID,
+		Nome:                 e.Nome,
+		Tipo:                 e.Tipo,
+		DataInicio:           e.Data,
+		UsuarioIDResponsavel: uuidStringToBinary(e.UsuarioID),
+		Descricao:            e.Descricao,
+		Local:                e.Local,
+		Status:               status,
+		PoliticaConvidados:   e.PoliticaConvidados,
+		PoliticaCancelamento: e.PoliticaCancelamento,
+		RateiosHabilitado:    e.RateiosHabilitado,
+		PagamentosHabilitado: e.PagamentosHabilitado,
+		CriadoEm:            now,
+		AtualizadoEm:        now,
+	}
+	if e.LimiteConvidados != nil {
+		v := int32(*e.LimiteConvidados)
+		doc.LimiteConvidados = &v
+	}
+	if _, err := r.col.InsertOne(ctx, doc); err != nil {
 		return nil, apierr.Internal(err.Error())
 	}
 	saved := eventoFromDoc(doc)
 	return &saved, nil
 }
 
-// Update replaces an existing event document.
+// Update updates an existing event using $set to preserve unknown fields.
 func (r *EventoRepository) Update(ctx context.Context, e *domain.Evento) (*domain.Evento, error) {
-	oid, err := bson.ObjectIDFromHex(e.ID)
-	if err != nil {
-		return nil, apierr.NotFound("evento", e.ID)
+	filter := parseIDToFilter(e.ID)
+	now := time.Now().UTC()
+	setDoc := bson.D{
+		{Key: "nome", Value: e.Nome},
+		{Key: "tipo", Value: e.Tipo},
+		{Key: "data_inicio", Value: e.Data},
+		{Key: "descricao", Value: e.Descricao},
+		{Key: "local", Value: e.Local},
+		{Key: "status", Value: string(e.Status)},
+		{Key: "politica_convidados", Value: e.PoliticaConvidados},
+		{Key: "politica_cancelamento", Value: e.PoliticaCancelamento},
+		{Key: "rateios_habilitado", Value: e.RateiosHabilitado},
+		{Key: "pagamentos_habilitado", Value: e.PagamentosHabilitado},
+		{Key: "atualizado_em", Value: now},
 	}
-	doc := eventoToDoc(e)
-	doc.ID = oid
-	filter := bson.D{{Key: "_id", Value: oid}}
-	_, err = r.col.ReplaceOne(ctx, filter, doc)
+	update := bson.D{{Key: "$set", Value: setDoc}}
+	res, err := r.col.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return nil, apierr.Internal(err.Error())
 	}
+	if res.MatchedCount == 0 {
+		return nil, apierr.NotFound("evento", e.ID)
+	}
+	e.UpdatedAt = now
 	return e, nil
 }
 
-// DeleteByID removes an event by its ObjectID.
+// DeleteByID removes an event by its ID.
 func (r *EventoRepository) DeleteByID(ctx context.Context, id string) error {
-	oid, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return apierr.NotFound("evento", id)
-	}
-	res, err := r.col.DeleteOne(ctx, bson.D{{Key: "_id", Value: oid}})
+	filter := parseIDToFilter(id)
+	res, err := r.col.DeleteOne(ctx, filter)
 	if err != nil {
 		return apierr.Internal(err.Error())
 	}
@@ -146,52 +176,26 @@ func (r *EventoRepository) DeleteByID(ctx context.Context, id string) error {
 // ---- helpers ----
 
 func eventoFromDoc(doc eventoDocument) domain.Evento {
+	var limite *int
+	if doc.LimiteConvidados != nil {
+		v := int(*doc.LimiteConvidados)
+		limite = &v
+	}
 	return domain.Evento{
-		ID:                   doc.ID.Hex(),
-		UsuarioID:            doc.UsuarioID,
+		ID:                   rawIDToString(doc.ID),
+		UsuarioID:            rawIDToString(doc.UsuarioIDResponsavel),
 		Nome:                 doc.Nome,
 		Tipo:                 doc.Tipo,
-		Data:                 doc.Data,
+		Data:                 doc.DataInicio,
 		Descricao:            doc.Descricao,
 		Local:                doc.Local,
-		FotoURL:              doc.FotoURL,
 		Status:               domain.EventoStatus(doc.Status),
-		ConvidadosIDs:        doc.ConvidadosIDs,
 		PoliticaConvidados:   doc.PoliticaConvidados,
-		LimiteConvidados:     doc.LimiteConvidados,
+		LimiteConvidados:     limite,
 		RateiosHabilitado:    doc.RateiosHabilitado,
-		TipoDivisaoRateio:    doc.TipoDivisaoRateio,
 		PagamentosHabilitado: doc.PagamentosHabilitado,
-		MetodosPagamento:     doc.MetodosPagamento,
-		PrazoPagamento:       doc.PrazoPagamento,
-		RegrasCustomizadas:   doc.RegrasCustomizadas,
 		PoliticaCancelamento: doc.PoliticaCancelamento,
 		CriadoEm:             doc.CriadoEm,
-		UpdatedAt:            doc.UpdatedAt,
-	}
-}
-
-func eventoToDoc(e *domain.Evento) eventoDocument {
-	return eventoDocument{
-		UsuarioID:            e.UsuarioID,
-		Nome:                 e.Nome,
-		Tipo:                 e.Tipo,
-		Data:                 e.Data,
-		Descricao:            e.Descricao,
-		Local:                e.Local,
-		FotoURL:              e.FotoURL,
-		Status:               string(e.Status),
-		ConvidadosIDs:        e.ConvidadosIDs,
-		PoliticaConvidados:   e.PoliticaConvidados,
-		LimiteConvidados:     e.LimiteConvidados,
-		RateiosHabilitado:    e.RateiosHabilitado,
-		TipoDivisaoRateio:    e.TipoDivisaoRateio,
-		PagamentosHabilitado: e.PagamentosHabilitado,
-		MetodosPagamento:     e.MetodosPagamento,
-		PrazoPagamento:       e.PrazoPagamento,
-		RegrasCustomizadas:   e.RegrasCustomizadas,
-		PoliticaCancelamento: e.PoliticaCancelamento,
-		CriadoEm:             e.CriadoEm,
-		UpdatedAt:            e.UpdatedAt,
+		UpdatedAt:            doc.AtualizadoEm,
 	}
 }

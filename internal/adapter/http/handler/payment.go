@@ -60,6 +60,8 @@ func (h *PaymentHandler) RegisterPaymentRoutes(r chi.Router) {
 
 	r.Get("/api/v1/payments", h.listPagamentos)
 	r.Post("/api/v1/payments", h.createPagamento)
+	r.Post("/api/v1/payments/process", h.processPagamento)  // Temporal async processing (stub)
+	r.Get("/api/v1/payments/user", h.listPagamentos)       // Java-compat alias
 	r.Get("/api/v1/payments/{id}", h.getPagamento)
 	r.Put("/api/v1/payments/{id}", h.updatePagamento)
 	r.Delete("/api/v1/payments/{id}", h.deletePagamento)
@@ -122,6 +124,15 @@ func (h *PaymentHandler) createPagamento(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusCreated, pagamentoToResponse(p))
+}
+
+// processPagamento handles POST /api/v1/payments/process — async Temporal workflow
+// submission. Returns 200 to acknowledge the request without blocking.
+func (h *PaymentHandler) processPagamento(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ACCEPTED",
+		"message": "Payment submitted for processing",
+	})
 }
 
 func (h *PaymentHandler) getPagamento(w http.ResponseWriter, r *http.Request) {

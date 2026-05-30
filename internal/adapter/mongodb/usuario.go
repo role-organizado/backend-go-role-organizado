@@ -2,6 +2,9 @@ package mongodb
 
 import (
 	"context"
+	"encoding/hex"
+	"fmt"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -41,8 +44,10 @@ type enderecoDoc struct {
 }
 
 // usuarioDocument is the MongoDB BSON document for Usuario.
+// ID uses interface{} to support ObjectID (Go-created docs), UUID Binary (Java-created docs),
+// and plain string _id values — enabling cross-compatibility between Java and Go backends.
 type usuarioDocument struct {
-	ID             bson.ObjectID      `bson:"_id,omitempty"`
+	ID             interface{}        `bson:"_id,omitempty"`
 	Nome           string             `bson:"nome"`
 	Email          string             `bson:"email"`
 	CPF            string             `bson:"cpf,omitempty"`
@@ -58,6 +63,53 @@ type usuarioDocument struct {
 	UpdatedAt      time.Time          `bson:"updated_at"`
 }
 
+// rawIDToString converts any MongoDB _id value to a string representation.
+// Handles ObjectID (hex string), UUID Binary (UUID string format), and plain strings.
+func rawIDToString(id interface{}) string {
+	if id == nil {
+		return ""
+	}
+	switch v := id.(type) {
+	case bson.ObjectID:
+		return v.Hex()
+	case string:
+		return v
+	case bson.Binary:
+		// UUID stored as BSON Binary (subtype 3 = old UUID, subtype 4 = UUID RFC 4122)
+		if (v.Subtype == 3 || v.Subtype == 4) && len(v.Data) == 16 {
+			b := v.Data
+			return fmt.Sprintf("%s-%s-%s-%s-%s",
+				hex.EncodeToString(b[0:4]),
+				hex.EncodeToString(b[4:6]),
+				hex.EncodeToString(b[6:8]),
+				hex.EncodeToString(b[8:10]),
+				hex.EncodeToString(b[10:16]))
+		}
+		return hex.EncodeToString(v.Data)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// parseIDToFilter builds a MongoDB _id filter from a string ID.
+// Handles ObjectID hex strings, UUID strings (8-4-4-4-12 format), and plain strings.
+func parseIDToFilter(id string) bson.D {
+	// Try as ObjectID hex (exactly 24 hex chars)
+	if oid, err := bson.ObjectIDFromHex(id); err == nil {
+		return bson.D{{Key: "_id", Value: oid}}
+	}
+	// Try as UUID string (8-4-4-4-12 hex format → Binary subtype 4)
+	parts := strings.Split(id, "-")
+	if len(parts) == 5 {
+		hexStr := strings.Join(parts, "")
+		if b, err := hex.DecodeString(hexStr); err == nil && len(b) == 16 {
+			return bson.D{{Key: "_id", Value: bson.Binary{Subtype: 0x04, Data: b}}}
+		}
+	}
+	// Fallback: string _id
+	return bson.D{{Key: "_id", Value: id}}
+}
+
 // UsuarioRepository implements portout.UsuarioRepository using MongoDB.
 type UsuarioRepository struct {
 	col *mongo.Collection
@@ -68,14 +120,11 @@ func NewUsuarioRepository(client *Client) *UsuarioRepository {
 	return &UsuarioRepository{col: client.Collection("usuarios")}
 }
 
-// FindByID returns a Usuario by its ObjectID hex string.
+// FindByID returns a Usuario by its ID string (ObjectID hex, UUID string, or plain string).
 func (r *UsuarioRepository) FindByID(ctx context.Context, id string) (*auth.Usuario, error) {
-	oid, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, apierr.BadRequest("id inválido: " + id)
-	}
+	filter := parseIDToFilter(id)
 	var doc usuarioDocument
-	if err := r.col.FindOne(ctx, bson.D{{Key: "_id", Value: oid}}).Decode(&doc); err != nil {
+	if err := r.col.FindOne(ctx, filter).Decode(&doc); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, apierr.NotFound("usuario", id)
 		}
@@ -119,7 +168,7 @@ func (r *UsuarioRepository) FindByProviderID(ctx context.Context, provider, prov
 	return &u, nil
 }
 
-// Save inserts a new Usuario document.
+// Save inserts a new Usuario document with a freshly generated ObjectID.
 func (r *UsuarioRepository) Save(ctx context.Context, u *auth.Usuario) (*auth.Usuario, error) {
 	now := time.Now().UTC()
 	doc := usuarioToDoc(u)
@@ -134,22 +183,54 @@ func (r *UsuarioRepository) Save(ctx context.Context, u *auth.Usuario) (*auth.Us
 	return &saved, nil
 }
 
-// Update replaces an existing Usuario document.
+// Update updates an existing Usuario using $set to avoid replacing the _id field.
+// This is required for cross-compatibility: Java may use UUID binary _id while Go uses ObjectID.
 func (r *UsuarioRepository) Update(ctx context.Context, u *auth.Usuario) (*auth.Usuario, error) {
-	oid, err := bson.ObjectIDFromHex(u.ID)
-	if err != nil {
-		return nil, apierr.BadRequest("id inválido: " + u.ID)
-	}
+	filter := parseIDToFilter(u.ID)
 	doc := usuarioToDoc(u)
-	doc.ID = oid
-	doc.UpdatedAt = time.Now().UTC()
+	now := time.Now().UTC()
 
-	opts := options.Replace().SetUpsert(false)
-	if _, err := r.col.ReplaceOne(ctx, bson.D{{Key: "_id", Value: oid}}, doc, opts); err != nil {
+	setFields := bson.D{
+		{Key: "nome", Value: doc.Nome},
+		{Key: "email", Value: doc.Email},
+		{Key: "ativo", Value: doc.Ativo},
+		{Key: "roles", Value: doc.Roles},
+		{Key: "updated_at", Value: now},
+	}
+	if doc.CPF != "" {
+		setFields = append(setFields, bson.E{Key: "cpf", Value: doc.CPF})
+	}
+	if doc.SenhaHash != "" {
+		setFields = append(setFields, bson.E{Key: "senha_hash", Value: doc.SenhaHash})
+	}
+	if doc.DataNascimento != nil {
+		setFields = append(setFields, bson.E{Key: "data_nascimento", Value: doc.DataNascimento})
+	}
+	if doc.FotoPerfil != "" {
+		setFields = append(setFields, bson.E{Key: "foto_perfil", Value: doc.FotoPerfil})
+	}
+	if doc.Telefone != nil {
+		setFields = append(setFields, bson.E{Key: "telefone", Value: doc.Telefone})
+	}
+	if doc.Endereco != nil {
+		setFields = append(setFields, bson.E{Key: "endereco", Value: doc.Endereco})
+	}
+	if len(doc.ProviderLogin) > 0 {
+		setFields = append(setFields, bson.E{Key: "provider_login", Value: doc.ProviderLogin})
+	}
+
+	update := bson.D{{Key: "$set", Value: setFields}}
+	if _, err := r.col.UpdateOne(ctx, filter, update); err != nil {
 		return nil, err
 	}
-	updated := usuarioFromDoc(doc)
-	return &updated, nil
+
+	// Fetch the updated document to return the current state
+	var updated usuarioDocument
+	if err := r.col.FindOne(ctx, filter).Decode(&updated); err != nil {
+		return nil, err
+	}
+	result := usuarioFromDoc(updated)
+	return &result, nil
 }
 
 // FindAll returns a paginated list of users.
@@ -189,13 +270,10 @@ func (r *UsuarioRepository) FindAll(ctx context.Context, page, pageSize int) ([]
 	return result, total, nil
 }
 
-// DeleteByID removes a Usuario by ID.
+// DeleteByID removes a Usuario by ID string (ObjectID hex, UUID string, or plain string).
 func (r *UsuarioRepository) DeleteByID(ctx context.Context, id string) error {
-	oid, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return apierr.BadRequest("id inválido: " + id)
-	}
-	res, err := r.col.DeleteOne(ctx, bson.D{{Key: "_id", Value: oid}})
+	filter := parseIDToFilter(id)
+	res, err := r.col.DeleteOne(ctx, filter)
 	if err != nil {
 		return err
 	}
@@ -223,7 +301,7 @@ func usuarioFromDoc(doc usuarioDocument) auth.Usuario {
 		}
 	}
 	u := auth.Usuario{
-		ID:            doc.ID.Hex(),
+		ID:            rawIDToString(doc.ID),
 		Nome:          doc.Nome,
 		Email:         doc.Email,
 		CPF:           doc.CPF,
@@ -279,3 +357,5 @@ func usuarioToDoc(u *auth.Usuario) usuarioDocument {
 	}
 	return doc
 }
+
+

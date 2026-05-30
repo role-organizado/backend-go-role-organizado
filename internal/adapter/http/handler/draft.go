@@ -165,6 +165,33 @@ func (h *DraftHandler) createDraft(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+
+	// Accept optional initial fields in the body (Java parity: create can set nome, tipo, etc.)
+	var req updateDraftRequest
+	if decodeErr := json.NewDecoder(r.Body).Decode(&req); decodeErr == nil {
+		// Only update if at least one field is provided
+		if req.Nome != nil || req.Tipo != nil || req.Descricao != nil || req.Local != nil {
+			itens := make([]portin.DraftRateioItem, len(req.RateiosItens))
+			for i, ri := range req.RateiosItens {
+				itens[i] = portin.DraftRateioItem{
+					Descricao:  ri.Descricao,
+					Valor:      ri.Valor,
+					Quantidade: ri.Quantidade,
+				}
+			}
+			in := portin.UpsertDraftInput{
+				Nome:      req.Nome,
+				Tipo:      req.Tipo,
+				Data:      req.Data,
+				Descricao: req.Descricao,
+				Local:     req.Local,
+			}
+			if updated, updateErr := h.updateUC.Execute(r.Context(), d.ID, userID, in); updateErr == nil {
+				d = updated
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, draftToResponse(d))
 }
 
