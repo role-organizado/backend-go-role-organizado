@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging, develop]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: Run unit tests
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./pkg/... ./internal/...
+      - name: Coverage report
+        run: go tool cover -func=coverage.out | tail -1
+
+  build:
+    name: Build
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - name: Build binary
+        run: CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server/
+      - name: Build Docker image
+        run: docker build -t backend-go-role-organizado:${{ github.sha }} .

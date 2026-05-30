@@ -1,0 +1,36 @@
+# Go binaries
+bin/
+*.exe
+
+# Build output
+target/
+
+# Go module cache
+vendor/
+
+# Test coverage
+*.out
+coverage.html
+
+# Environment files (never commit)
+.env
+.env.*
+!.env.example
+
+# Swagger generated files (regenerate with: swag init)
+docs/swagger.json
+docs/swagger.yaml
+docs/docs.go
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+tmp/
+*.tmp
