@@ -36,6 +36,8 @@ import (
 	ucpayment "github.com/role-organizado/backend-go-role-organizado/internal/usecase/payment"
 	// Phase 6
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
+	// Phase 7
+	ucstorage "github.com/role-organizado/backend-go-role-organizado/internal/usecase/storage"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -207,6 +209,14 @@ func main() {
 		listNotifUC, getNotifUC, createNotifUC, marcarLidaUC, marcarTodasUC, deleteNotifUC, countUnreadUC,
 	)
 
+	// --- Phase 7: File Storage (GridFS) ---
+	arquivoRepo := mongodb.NewArquivoRepository(mongoClient)
+	gridfsStorage := mongodb.NewGridFSStorageAdapter(mongoClient)
+	uploadUC := ucstorage.NewUploadArquivo(arquivoRepo, gridfsStorage)
+	downloadUC := ucstorage.NewDownloadArquivo(arquivoRepo, gridfsStorage)
+	deleteArquivoUC := ucstorage.NewDeleteArquivo(arquivoRepo, gridfsStorage)
+	storageHandler := handler.NewStorageHandler(uploadUC, downloadUC, deleteArquivoUC)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -234,6 +244,7 @@ func main() {
 		rateioHandler.RegisterRateioRoutes(r)
 		paymentHandler.RegisterPaymentRoutes(r)
 		notificationHandler.RegisterNotificationRoutes(r)
+		storageHandler.RegisterStorageRoutes(r)
 	})
 
 	// --- HTTP server ---
