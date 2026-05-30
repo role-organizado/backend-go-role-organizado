@@ -217,6 +217,9 @@ func main() {
 	deleteArquivoUC := ucstorage.NewDeleteArquivo(arquivoRepo, gridfsStorage)
 	storageHandler := handler.NewStorageHandler(uploadUC, downloadUC, deleteArquivoUC)
 
+	// --- Phase 8: Temporal Workflow Proxies ---
+	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -245,6 +248,7 @@ func main() {
 		paymentHandler.RegisterPaymentRoutes(r)
 		notificationHandler.RegisterNotificationRoutes(r)
 		storageHandler.RegisterStorageRoutes(r)
+		workflowProxyHandler.RegisterWorkflowRoutes(r)
 	})
 
 	// --- HTTP server ---

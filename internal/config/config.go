@@ -36,6 +36,8 @@ type ServerConfig struct {
 	CORSOrigins []string
 	// Env is the deployment environment (local, staging, production).
 	Env string
+	// JavaBackendURL is the base URL of the Java Spring Boot backend for Strangler Fig proxying.
+	JavaBackendURL string
 }
 
 // MongoDBConfig holds MongoDB connection settings.
@@ -105,6 +107,7 @@ func Load() (*AppConfig, error) {
 			ShutdownTimeout: v.GetDuration("server.shutdown_timeout"),
 			CORSOrigins:     strings.Split(v.GetString("server.cors_origins"), ","),
 			Env:             v.GetString("server.env"),
+			JavaBackendURL:  v.GetString("server.java_backend_url"),
 		},
 		MongoDB: MongoDBConfig{
 			URI:      v.GetString("mongo.uri"),
@@ -154,6 +157,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.shutdown_timeout", "30s")
 	v.SetDefault("server.cors_origins", "http://localhost:3000,http://localhost:4300")
 	v.SetDefault("server.env", "local")
+	v.SetDefault("server.java_backend_url", "http://localhost:8080")
 
 	v.SetDefault("mongo.uri", "mongodb://admin:e2952c6f90af7aee28f401c4ffc030b9@10.11.12.238:27017/role_organizado_dev?authSource=admin&replicaSet=rs0")
 	v.SetDefault("mongo.database", "role_organizado_dev")
