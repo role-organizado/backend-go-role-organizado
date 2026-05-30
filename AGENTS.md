@@ -81,17 +81,37 @@ GET http://localhost:8090/actuator/health
 → {"status":"UP","components":{"mongo":{"status":"UP"}}}
 ```
 
-## Fases de Migração (Strangler Fig)
+## Status da Migração (Spec 155)
 
-BFF roteia via env vars (`DOMINIO_BACKEND_URL`):
-- Java `8080` = padrão até a fase ser completada
-- Go `8090` = recebe tráfego quando a fase estiver completa
+**Todas as 13 fases concluídas.** Backend Go está feature-completo e pronto para receber tráfego via BFF Strangler Fig.
 
-| Fase | Domínio |
-|------|---------|
-| 0 ✅ | Foundation |
-| 1 🔜 | Auth |
-| 2+ | Events, Participants, Rateio, Payments... |
+| Fase | Status | Domínio |
+|------|--------|---------|
+| 0 | ✅ | Foundation — chi, MongoDB, JWT, OTel, health check |
+| 1 | ✅ | Configuration Domain (Dominio, FeatureFlag) |
+| 2 | ✅ | Identity & Auth (Usuario, JWT, Google/Apple OAuth, Biometric) |
+| 3 | ✅ | Events & Drafts (Evento, EventoDraft, wizard, Regra) |
+| 4 | ✅ | Rateios/Cost Splits (Rateio, Itens, Fechamento) |
+| 5 | ✅ | Payments (Transaction, Installment, PIX/Boleto/Card) |
+| 6 | ✅ | Notifications (Notificacao, templates, SQS) |
+| 7 | ✅ | File Storage (GridFS para comprovantes) |
+| 8 | ✅ | Temporal Workflow Proxies (todos os 13 workflows) |
+| 9 | ✅ | Admin Routes (handler/config.go + handler/usuario.go) |
+| 10 | ✅ | Observability Enrichment (OTel spans, structured logging) |
+| 11 | ✅ | Integration Tests (Testcontainers, MongoDB 7.0, 11 testes) |
+| 12 | ✅ | Strangler Fig BFF Routing (per-domain flags, zero impacto prod) |
+| 13 | ✅ | Java Decommission (documentado, plano de cutover pronto) |
+
+## Ativando Tráfego por Domínio (Cutover)
+
+No BFF, ativar via env var:
+```bash
+STRANGLER_AUTH_ENABLED=true       # roteia auth → Go:8090
+STRANGLER_EVENTOS_ENABLED=true    # roteia eventos → Go:8090
+# ... (ver bff/docs/STRANGLER-FIG-CUTOVER.md para ordem recomendada)
+```
+
+Guia completo: `bff-role-organizado/docs/STRANGLER-FIG-CUTOVER.md`
 
 ## Adicionando um Novo Domínio
 
@@ -102,4 +122,4 @@ BFF roteia via env vars (`DOMINIO_BACKEND_URL`):
 5. Implementar handler HTTP em `internal/adapter/http/handler/<dominio>.go`
 6. Montar rotas em `cmd/server/main.go` dentro do grupo protegido
 7. Criar migração em `migrations/` se necessário
-8. Atualizar BFF env var para rotear para `:8090`
+8. Adicionar flag `STRANGLER_<DOMAIN>_ENABLED` no BFF `env.ts`
