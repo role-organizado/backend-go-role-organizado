@@ -1,6 +1,7 @@
 // Package server bootstraps and starts the HTTP server.
 // Phase 0: minimal chi router with health endpoint, middleware chain, and graceful shutdown.
-// Subsequent phases will add domain routers as they are migrated from Java.
+// Phase 1: Config domain (Dominios + ConfigSistema).
+// Phase 2: Auth + Usuarios domain.
 package main
 
 import (
@@ -16,11 +17,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/handler"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
 	pkgjwt "github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
+
+	// Phase 1
+	ucconfig "github.com/role-organizado/backend-go-role-organizado/internal/usecase/config"
+	// Phase 2
+	ucauth "github.com/role-organizado/backend-go-role-organizado/internal/usecase/auth"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -73,6 +80,47 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --- Phase 1: Config domain repositories ---
+	dominioRepo := mongodb.NewDominioRepository(mongoClient)
+	configSistemaRepo := mongodb.NewConfigSistemaRepository(mongoClient)
+
+	// --- Phase 1: Config domain use cases ---
+	listDominiosUC := ucconfig.NewListDominios(dominioRepo)
+	getDominioUC := ucconfig.NewGetDominio(dominioRepo)
+	upsertDominioUC := ucconfig.NewUpsertDominio(dominioRepo)
+	deleteDominioUC := ucconfig.NewDeleteDominio(dominioRepo)
+	getConfigUC := ucconfig.NewGetConfigSistema(configSistemaRepo)
+	upsertConfigUC := ucconfig.NewUpsertConfigSistema(configSistemaRepo)
+
+	// --- Phase 2: Auth domain repositories ---
+	usuarioRepo := mongodb.NewUsuarioRepository(mongoClient)
+	refreshTokenRepo := mongodb.NewRefreshTokenRepository(mongoClient)
+
+	// --- Phase 2: Auth domain use cases ---
+	loginUC := ucauth.NewLogin(usuarioRepo, refreshTokenRepo, jwtSvc)
+	registerUC := ucauth.NewRegister(usuarioRepo, refreshTokenRepo, jwtSvc)
+	refreshUC := ucauth.NewRefreshToken(refreshTokenRepo, usuarioRepo, jwtSvc)
+	validateUC := ucauth.NewValidateToken(usuarioRepo, jwtSvc)
+	logoutUC := ucauth.NewLogout(refreshTokenRepo)
+	googleUC := ucauth.NewGoogleAuth(usuarioRepo, refreshTokenRepo, jwtSvc)
+	appleUC := ucauth.NewAppleAuth(usuarioRepo, refreshTokenRepo, jwtSvc)
+	getUsuarioUC := ucauth.NewGetUsuario(usuarioRepo)
+	updateUsuarioUC := ucauth.NewUpdateUsuario(usuarioRepo)
+	listUsuariosUC := ucauth.NewListUsuarios(usuarioRepo)
+	updateRoleUC := ucauth.NewUpdateUserRole(usuarioRepo)
+
+	// --- HTTP Handlers ---
+	configHandler := handler.NewConfigHandler(
+		listDominiosUC, getDominioUC, upsertDominioUC, deleteDominioUC,
+		getConfigUC, upsertConfigUC,
+	)
+	authHandler := handler.NewAuthHandler(
+		loginUC, registerUC, refreshUC, validateUC, logoutUC, googleUC, appleUC,
+	)
+	usuarioHandler := handler.NewUsuarioHandler(
+		getUsuarioUC, updateUsuarioUC, listUsuariosUC, updateRoleUC,
+	)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -87,13 +135,14 @@ func main() {
 	// --- Health endpoint (public, no auth required) ---
 	r.Get("/actuator/health", handler.HealthHandler(mongoClient))
 
+	// --- Public routes (no JWT required) ---
+	authHandler.RegisterRoutes(r)
+	configHandler.RegisterRoutes(r) // GET /api/v1/dominios (public read) + admin write
+
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.JWTAuth(jwtSvc, publicPrefixes))
-
-		// TODO Phase 1+: mount domain routers here
-		// r.Mount("/api/v1/events", eventRouter)
-		// r.Mount("/api/v1/users", userRouter)
+		usuarioHandler.RegisterRoutes(r)
 	})
 
 	// --- HTTP server ---

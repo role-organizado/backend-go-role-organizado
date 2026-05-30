@@ -24,8 +24,9 @@ type Claims struct {
 
 // TokenPair holds an access token and a refresh token.
 type TokenPair struct {
-	AccessToken  string
-	RefreshToken string
+	AccessToken      string
+	RefreshToken     string
+	RefreshExpiresAt time.Time
 }
 
 // Service manages JWT token generation and validation.
@@ -62,8 +63,9 @@ func (s *Service) GenerateTokenPair(userID, email, nome, telefone string, roles 
 	}
 
 	return &TokenPair{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		AccessToken:      accessToken,
+		RefreshToken:     refreshToken,
+		RefreshExpiresAt: time.Now().Add(s.refreshTokenTTL),
 	}, nil
 }
 
