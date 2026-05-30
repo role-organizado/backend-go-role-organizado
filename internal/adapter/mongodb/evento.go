@@ -2,6 +2,8 @@ package mongodb
 
 import (
 	"context"
+	"encoding/base64"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/event"
+	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
 
@@ -65,6 +68,92 @@ func (r *EventoRepository) FindByID(ctx context.Context, id string) (*domain.Eve
 func (r *EventoRepository) FindByUsuarioID(ctx context.Context, usuarioID string, page, pageSize int) ([]domain.Evento, int64, error) {
 	filter := bson.D{{Key: "usuario_id_responsavel", Value: uuidStringToBinary(usuarioID)}}
 	return r.findPaginated(ctx, filter, page, pageSize)
+}
+
+// FindByUsuarioIDCursor returns a cursor-paginated list of events for the given user.
+// The cursor is a base64-encoded skip offset, allowing stable forward-only pagination.
+func (r *EventoRepository) FindByUsuarioIDCursor(ctx context.Context, usuarioID string, filtros portout.EventoQueryFiltros) (portout.EventosCursorPage, error) {
+	limit := filtros.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	// Decode cursor → skip offset
+	skip := int64(0)
+	if filtros.Cursor != nil && *filtros.Cursor != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(*filtros.Cursor); err == nil {
+			if off, err := strconv.ParseInt(string(decoded), 10, 64); err == nil && off > 0 {
+				skip = off
+			}
+		}
+	}
+
+	// Build filter
+	filter := bson.D{{Key: "usuario_id_responsavel", Value: uuidStringToBinary(usuarioID)}}
+	if filtros.Status != nil {
+		filter = append(filter, bson.E{Key: "status", Value: *filtros.Status})
+	}
+	if filtros.Tipo != nil {
+		filter = append(filter, bson.E{Key: "tipo", Value: *filtros.Tipo})
+	}
+	if filtros.DataInicioGte != nil || filtros.DataInicioLte != nil {
+		rangeDoc := bson.D{}
+		if filtros.DataInicioGte != nil {
+			rangeDoc = append(rangeDoc, bson.E{Key: "$gte", Value: *filtros.DataInicioGte})
+		}
+		if filtros.DataInicioLte != nil {
+			rangeDoc = append(rangeDoc, bson.E{Key: "$lte", Value: *filtros.DataInicioLte})
+		}
+		filter = append(filter, bson.E{Key: "data_inicio", Value: rangeDoc})
+	}
+
+	total, err := r.col.CountDocuments(ctx, filter)
+	if err != nil {
+		return portout.EventosCursorPage{}, apierr.Internal(err.Error())
+	}
+
+	// Fetch limit+1 to detect hasNextPage
+	fetchLimit := int64(limit + 1)
+	opts := options.Find().
+		SetSkip(skip).
+		SetLimit(fetchLimit).
+		SetSort(bson.D{{Key: "data_inicio", Value: -1}, {Key: "_id", Value: -1}})
+
+	cursor, err := r.col.Find(ctx, filter, opts)
+	if err != nil {
+		return portout.EventosCursorPage{}, apierr.Internal(err.Error())
+	}
+	defer cursor.Close(ctx)
+
+	var docs []eventoDocument
+	if err := cursor.All(ctx, &docs); err != nil {
+		return portout.EventosCursorPage{}, apierr.Internal(err.Error())
+	}
+
+	hasNextPage := len(docs) > limit
+	if hasNextPage {
+		docs = docs[:limit]
+	}
+
+	eventos := make([]domain.Evento, len(docs))
+	for i, d := range docs {
+		eventos[i] = eventoFromDoc(d)
+	}
+
+	var nextCursor *string
+	if hasNextPage {
+		nextOffset := skip + int64(limit)
+		encoded := base64.StdEncoding.EncodeToString([]byte(strconv.FormatInt(nextOffset, 10)))
+		nextCursor = &encoded
+	}
+
+	return portout.EventosCursorPage{
+		Eventos:     eventos,
+		Total:       total,
+		NextCursor:  nextCursor,
+		HasNextPage: hasNextPage,
+		Limit:       limit,
+	}, nil
 }
 
 // FindAll paginates all events.

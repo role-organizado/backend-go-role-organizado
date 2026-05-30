@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/role-organizado/backend-go-role-organizado/internal/domain/event"
+	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 )
 
 // ---- Evento inputs ----
@@ -72,6 +73,23 @@ type UpdateEventoUseCase interface {
 // DeleteEventoUseCase deletes an event by ID.
 type DeleteEventoUseCase interface {
 	Execute(ctx context.Context, id, requesterID string) error
+}
+
+// ListEventosByUsuarioInput holds parameters for the user-filtered cursor-paginated listing.
+type ListEventosByUsuarioInput struct {
+	UsuarioID     string
+	RequesterID   string
+	Status        *string
+	Tipo          *string
+	DataInicioGte *time.Time
+	DataInicioLte *time.Time
+	Cursor        *string
+	Limit         int
+}
+
+// ListEventosByUsuarioUseCase lists events belonging to a specific user (cursor pagination).
+type ListEventosByUsuarioUseCase interface {
+	Execute(ctx context.Context, in ListEventosByUsuarioInput) (portout.EventosCursorPage, error)
 }
 
 // ---- EventoDraft inputs ----

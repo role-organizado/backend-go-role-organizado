@@ -141,6 +141,7 @@ func main() {
 	listEventosUC := ucevent.NewListEventos(eventoRepo)
 	updateEventoUC := ucevent.NewUpdateEvento(eventoRepo)
 	deleteEventoUC := ucevent.NewDeleteEvento(eventoRepo)
+	listEventosByUsuarioUC := ucevent.NewListEventosByUsuario(eventoRepo)
 
 	// --- Phase 3: Drafts domain use cases ---
 	createDraftUC := ucevent.NewCreateDraft(draftRepo)
@@ -153,6 +154,7 @@ func main() {
 	// --- Phase 3: HTTP Handlers ---
 	eventoHandler := handler.NewEventHandler(
 		createEventoUC, getEventoUC, listEventosUC, updateEventoUC, deleteEventoUC,
+		listEventosByUsuarioUC,
 	)
 	draftHandler := handler.NewDraftHandler(
 		createDraftUC, getDraftUC, listDraftsUC, updateDraftUC, deleteDraftUC, publishDraftUC,

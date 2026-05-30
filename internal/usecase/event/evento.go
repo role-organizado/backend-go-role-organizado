@@ -190,3 +190,34 @@ func (uc *DeleteEvento) Execute(ctx context.Context, id, requesterID string) err
 	}
 	return uc.eventos.DeleteByID(ctx, id)
 }
+
+// ---- ListEventosByUsuario ----
+
+// ListEventosByUsuario implements portin.ListEventosByUsuarioUseCase.
+type ListEventosByUsuario struct {
+	eventos portout.EventoRepository
+}
+
+// NewListEventosByUsuario creates a new ListEventosByUsuario use case.
+func NewListEventosByUsuario(e portout.EventoRepository) *ListEventosByUsuario {
+	return &ListEventosByUsuario{eventos: e}
+}
+
+// Execute lists events belonging to the given user (cursor pagination).
+// Enforces ownership: requester must be the same user unless empty (admin).
+func (uc *ListEventosByUsuario) Execute(ctx context.Context, in portin.ListEventosByUsuarioInput) (portout.EventosCursorPage, error) {
+	ctx, span := tracing.StartSpan(ctx, "usecase.event.listByUsuario", tracing.UserID(in.UsuarioID))
+	defer span.End()
+	if in.RequesterID != "" && in.RequesterID != in.UsuarioID {
+		return portout.EventosCursorPage{}, apierr.Forbidden("acesso negado: você só pode listar seus próprios eventos")
+	}
+	filtros := portout.EventoQueryFiltros{
+		Status:        in.Status,
+		Tipo:          in.Tipo,
+		DataInicioGte: in.DataInicioGte,
+		DataInicioLte: in.DataInicioLte,
+		Cursor:        in.Cursor,
+		Limit:         in.Limit,
+	}
+	return uc.eventos.FindByUsuarioIDCursor(ctx, in.UsuarioID, filtros)
+}
