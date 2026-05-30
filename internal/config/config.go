@@ -3,7 +3,9 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -89,9 +91,40 @@ type AsaasConfig struct {
 	APIKey  string
 }
 
+// loadDotEnv reads a .env file and injects each ROLE_* variable into the process
+// environment (only when the variable is not already set, so real env vars always
+// take precedence). This makes Viper's AutomaticEnv pick them up correctly.
+func loadDotEnv(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return // file absent — silently skip
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if _, exists := os.LookupEnv(key); !exists {
+			_ = os.Setenv(key, val)
+		}
+	}
+}
+
 // Load reads configuration from environment variables using Viper.
 // All env vars follow the pattern ROLE_* (e.g. ROLE_SERVER_PORT, ROLE_MONGO_URI).
+// If a .env file exists in the working directory it is loaded before env vars
+// (real env vars always take precedence over the file).
 func Load() (*AppConfig, error) {
+	loadDotEnv(".env")
+
 	v := viper.New()
 	v.SetEnvPrefix("ROLE")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
