@@ -16,11 +16,12 @@ import (
 
 // EventHandler handles event-related HTTP requests.
 type EventHandler struct {
-	createUC portin.CreateEventoUseCase
-	getUC    portin.GetEventoUseCase
-	listUC   portin.ListEventosUseCase
-	updateUC portin.UpdateEventoUseCase
-	deleteUC portin.DeleteEventoUseCase
+	createUC         portin.CreateEventoUseCase
+	getUC            portin.GetEventoUseCase
+	listUC           portin.ListEventosUseCase
+	updateUC         portin.UpdateEventoUseCase
+	deleteUC         portin.DeleteEventoUseCase
+	listByUsuarioUC  portin.ListEventosByUsuarioUseCase
 }
 
 // NewEventHandler creates a new EventHandler.
@@ -30,13 +31,15 @@ func NewEventHandler(
 	list portin.ListEventosUseCase,
 	update portin.UpdateEventoUseCase,
 	del portin.DeleteEventoUseCase,
+	listByUsuario portin.ListEventosByUsuarioUseCase,
 ) *EventHandler {
 	return &EventHandler{
-		createUC: create,
-		getUC:    get,
-		listUC:   list,
-		updateUC: update,
-		deleteUC: del,
+		createUC:        create,
+		getUC:           get,
+		listUC:          list,
+		updateUC:        update,
+		deleteUC:        del,
+		listByUsuarioUC: listByUsuario,
 	}
 }
 
@@ -44,6 +47,8 @@ func NewEventHandler(
 func (h *EventHandler) RegisterEventRoutes(r chi.Router) {
 	r.Get("/api/eventos", h.listEvento)
 	r.Post("/api/eventos", h.createEvento)
+	// /usuario/{usuarioId} must be registered before /{id} to avoid chi matching conflict
+	r.Get("/api/eventos/usuario/{usuarioId}", h.listEventoByUsuario)
 	r.Get("/api/eventos/{id}", h.getEvento)
 	r.Put("/api/eventos/{id}", h.updateEvento)
 	r.Delete("/api/eventos/{id}", h.deleteEvento)
@@ -117,13 +122,9 @@ type eventoResponse struct {
 func (h *EventHandler) listEvento(w http.ResponseWriter, r *http.Request) {
 	page := queryIntParam(r, "page", 1)
 	pageSize := queryIntParam(r, "pageSize", 20)
-	userID := r.URL.Query().Get("usuarioId")
-
-	var uidPtr *string
-	if userID != "" {
-		uidPtr = &userID
-	}
-	eventos, total, err := h.listUC.Execute(r.Context(), uidPtr, page, pageSize)
+	// Security: ignore usuarioId query param — use authenticated user from JWT.
+	// Use /api/eventos/usuario/{usuarioId} for user-filtered listing.
+	eventos, total, err := h.listUC.Execute(r.Context(), nil, page, pageSize)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -133,6 +134,71 @@ func (h *EventHandler) listEvento(w http.ResponseWriter, r *http.Request) {
 		resp[i] = eventoToResponse(&e)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": resp, "total": total, "page": page, "pageSize": pageSize})
+}
+
+func (h *EventHandler) listEventoByUsuario(w http.ResponseWriter, r *http.Request) {
+	requesterID := middleware.UserIDFromContext(r.Context())
+	if requesterID == "" {
+		writeError(w, apierr.Unauthorized("autenticação necessária"))
+		return
+	}
+	usuarioID := chi.URLParam(r, "usuarioId")
+	if usuarioID == "" {
+		writeError(w, apierr.BadRequest("usuarioId é obrigatório"))
+		return
+	}
+
+	var cursor *string
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		cursor = &c
+	}
+	var status, tipo *string
+	if s := r.URL.Query().Get("status"); s != "" {
+		status = &s
+	}
+	if t := r.URL.Query().Get("tipo"); t != "" {
+		tipo = &t
+	}
+	var dataInicioGte, dataInicioLte *time.Time
+	if v := r.URL.Query().Get("dataInicioGte"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			dataInicioGte = &t
+		}
+	}
+	if v := r.URL.Query().Get("dataInicioLte"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			dataInicioLte = &t
+		}
+	}
+	limit := queryIntParam(r, "limit", 20)
+
+	in := portin.ListEventosByUsuarioInput{
+		UsuarioID:     usuarioID,
+		RequesterID:   requesterID,
+		Status:        status,
+		Tipo:          tipo,
+		DataInicioGte: dataInicioGte,
+		DataInicioLte: dataInicioLte,
+		Cursor:        cursor,
+		Limit:         limit,
+	}
+	page, err := h.listByUsuarioUC.Execute(r.Context(), in)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	resp := make([]eventoResponse, len(page.Eventos))
+	for i, e := range page.Eventos {
+		e2 := e
+		resp[i] = eventoToResponse(&e2)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"eventos":     resp,
+		"total":       page.Total,
+		"nextCursor":  page.NextCursor,
+		"hasNextPage": page.HasNextPage,
+		"limit":       page.Limit,
+	})
 }
 
 func (h *EventHandler) createEvento(w http.ResponseWriter, r *http.Request) {

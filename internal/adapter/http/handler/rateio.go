@@ -3,11 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
-	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/rateio"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
+	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/rateio"
 	portin "github.com/role-organizado/backend-go-role-organizado/internal/port/in"
 )
 
@@ -62,6 +63,7 @@ func (h *RateioHandler) RegisterRateioRoutes(r chi.Router) {
 	// BFF-compatible paths
 	r.Get("/api/v1/rateios", h.listRateios)
 	r.Post("/api/v1/rateios", h.createRateio)
+	r.Get("/api/v1/rateios/by-evento/{eventoId}", h.listRateiosByEvento)
 	r.Get("/api/v1/rateios/{id}", h.getRateio)
 	r.Put("/api/v1/rateios/{id}", h.updateRateio)
 	r.Delete("/api/v1/rateios/{id}", h.deleteRateio)
@@ -69,6 +71,9 @@ func (h *RateioHandler) RegisterRateioRoutes(r chi.Router) {
 	r.Get("/api/v1/rateios/{id}/previa", h.previewRateio)  // Java-compat alias
 	r.Post("/api/v1/rateios/{id}/fechar", h.fecharRateio)
 	r.Get("/api/v1/rateios/{id}/fechamentos", h.getFechamentos)
+	// Legacy paths (Java-compat)
+	r.Get("/api/rateios/by-evento/{eventoId}", h.listRateiosByEvento)
+	r.Get("/api/rateios/v1/evento/{eventoId}", h.listRateiosByEvento)
 }
 
 // ---- Request/Response types ----
@@ -169,6 +174,35 @@ func (h *RateioHandler) listRateios(w http.ResponseWriter, r *http.Request) {
 		resp[i] = rateioToResponse(&r2)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *RateioHandler) listRateiosByEvento(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	eventoID := chi.URLParam(r, "eventoId")
+	rats, err := h.listUC.Execute(r.Context(), eventoID, userID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	type rateioWrapper struct {
+		Rateio rateioResponse `json:"rateio"`
+	}
+	rateioItems := make([]rateioWrapper, len(rats))
+	for i, rat := range rats {
+		r2 := rat // copy
+		rateioItems[i] = rateioWrapper{Rateio: rateioToResponse(&r2)}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"eventoId": eventoID,
+		"rateios":  rateioItems,
+		"metadata": map[string]interface{}{
+			"totalRateios": len(rateioItems),
+			"cacheHit":     false,
+			"timestamp":    time.Now().UTC().Format(time.RFC3339),
+		},
+	})
 }
 
 func (h *RateioHandler) updateRateio(w http.ResponseWriter, r *http.Request) {

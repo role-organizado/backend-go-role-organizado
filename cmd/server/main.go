@@ -141,6 +141,7 @@ func main() {
 	listEventosUC := ucevent.NewListEventos(eventoRepo)
 	updateEventoUC := ucevent.NewUpdateEvento(eventoRepo)
 	deleteEventoUC := ucevent.NewDeleteEvento(eventoRepo)
+	listEventosByUsuarioUC := ucevent.NewListEventosByUsuario(eventoRepo)
 
 	// --- Phase 3: Drafts domain use cases ---
 	createDraftUC := ucevent.NewCreateDraft(draftRepo)
@@ -153,6 +154,7 @@ func main() {
 	// --- Phase 3: HTTP Handlers ---
 	eventoHandler := handler.NewEventHandler(
 		createEventoUC, getEventoUC, listEventosUC, updateEventoUC, deleteEventoUC,
+		listEventosByUsuarioUC,
 	)
 	draftHandler := handler.NewDraftHandler(
 		createDraftUC, getDraftUC, listDraftsUC, updateDraftUC, deleteDraftUC, publishDraftUC,
@@ -220,6 +222,13 @@ func main() {
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
+	// --- Finance, Admin, Participantes handlers (direct MongoDB) ---
+	financeHandler := handler.NewFinanceHandler(mongoClient)
+	adminHandler := handler.NewAdminHandler(mongoClient)
+	participantesHandler := handler.NewParticipantesHandler(mongoClient)
+	usuariosEventoHandler := handler.NewUsuariosEventoHandler(mongoClient)
+	approvalsHandler := handler.NewApprovalsHandler(mongoClient)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -250,6 +259,11 @@ func main() {
 		notificationHandler.RegisterNotificationRoutes(r)
 		storageHandler.RegisterStorageRoutes(r)
 		workflowProxyHandler.RegisterWorkflowRoutes(r)
+		financeHandler.RegisterFinanceRoutes(r)
+		adminHandler.RegisterAdminRoutes(r)
+		participantesHandler.RegisterParticipantesRoutes(r)
+		usuariosEventoHandler.RegisterUsuariosEventoRoutes(r)
+		approvalsHandler.RegisterApprovalsRoutes(r)
 	})
 
 	// --- HTTP server ---

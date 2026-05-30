@@ -66,19 +66,19 @@ go mod tidy
 
 ## Fases de Migração
 
-| Fase | Domínio | Status |
-|------|---------|--------|
+| Fase | Domínio                                  | Status  |
+| ---- | ---------------------------------------- | ------- |
 | 0    | Foundation (scaffold, health, JWT, OTel) | ✅ Done |
-| 1    | Auth (/api/v1/auth/*) | 🔜 |
-| 2    | Events (/api/v1/events/*) | 🔜 |
-| 3    | Participants | 🔜 |
-| 4    | Rateio | 🔜 |
-| 5    | Payments | 🔜 |
-| 6    | Finance | 🔜 |
-| 7    | Notifications | 🔜 |
-| 8    | Config/Admin | 🔜 |
-| 9    | Temporal workers | 🔜 |
-| 10   | Traffic cutover | 🔜 |
-| 11   | Java decommission | 🔜 |
+| 1    | Auth (/api/v1/auth/\*)                   | 🔜      |
+| 2    | Events (/api/v1/events/\*)               | 🔜      |
+| 3    | Participants                             | 🔜      |
+| 4    | Rateio                                   | 🔜      |
+| 5    | Payments                                 | 🔜      |
+| 6    | Finance                                  | 🔜      |
+| 7    | Notifications                            | 🔜      |
+| 8    | Config/Admin                             | 🔜      |
+| 9    | Temporal workers                         | 🔜      |
+| 10   | Traffic cutover                          | 🔜      |
+| 11   | Java decommission                        | 🔜      |
 
 Spec completa: `role-organizado-workspace/specs/155-backend-go-migration/plan.md`
