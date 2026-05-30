@@ -34,6 +34,8 @@ import (
 	ucrateio "github.com/role-organizado/backend-go-role-organizado/internal/usecase/rateio"
 	// Phase 5
 	ucpayment "github.com/role-organizado/backend-go-role-organizado/internal/usecase/payment"
+	// Phase 6
+	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -190,6 +192,21 @@ func main() {
 		confirmarPayUC, upsertCfgPayUC, getCfgPayUC,
 	)
 
+	// --- Phase 6: Notifications domain ---
+	notificacaoRepo := mongodb.NewNotificacaoRepository(mongoClient)
+
+	listNotifUC := ucnotification.NewListNotificacoes(notificacaoRepo)
+	getNotifUC := ucnotification.NewGetNotificacao(notificacaoRepo)
+	createNotifUC := ucnotification.NewCreateNotificacao(notificacaoRepo)
+	marcarLidaUC := ucnotification.NewMarcarLida(notificacaoRepo)
+	marcarTodasUC := ucnotification.NewMarcarTodasLidas(notificacaoRepo)
+	deleteNotifUC := ucnotification.NewDeleteNotificacao(notificacaoRepo)
+	countUnreadUC := ucnotification.NewCountUnread(notificacaoRepo)
+
+	notificationHandler := handler.NewNotificationHandler(
+		listNotifUC, getNotifUC, createNotifUC, marcarLidaUC, marcarTodasUC, deleteNotifUC, countUnreadUC,
+	)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -216,6 +233,7 @@ func main() {
 		draftHandler.RegisterDraftRoutes(r)
 		rateioHandler.RegisterRateioRoutes(r)
 		paymentHandler.RegisterPaymentRoutes(r)
+		notificationHandler.RegisterNotificationRoutes(r)
 	})
 
 	// --- HTTP server ---
