@@ -32,6 +32,8 @@ import (
 	ucevent "github.com/role-organizado/backend-go-role-organizado/internal/usecase/event"
 	// Phase 4
 	ucrateio "github.com/role-organizado/backend-go-role-organizado/internal/usecase/rateio"
+	// Phase 5
+	ucpayment "github.com/role-organizado/backend-go-role-organizado/internal/usecase/payment"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -170,6 +172,24 @@ func main() {
 		previewRateioUC, fecharRateioUC, getFechamentosUC,
 	)
 
+	// --- Phase 5: Payments domain ---
+	pagamentoRepo := mongodb.NewPagamentoRepository(mongoClient)
+	configPagRepo := mongodb.NewConfigPagamentoRepository(mongoClient)
+
+	createPayUC := ucpayment.NewCreatePagamento(pagamentoRepo)
+	getPayUC := ucpayment.NewGetPagamento(pagamentoRepo)
+	listPayUC := ucpayment.NewListPagamentos(pagamentoRepo)
+	updatePayUC := ucpayment.NewUpdatePagamento(pagamentoRepo)
+	deletePayUC := ucpayment.NewDeletePagamento(pagamentoRepo)
+	confirmarPayUC := ucpayment.NewConfirmarPagamento(pagamentoRepo)
+	upsertCfgPayUC := ucpayment.NewUpsertConfigPagamento(configPagRepo)
+	getCfgPayUC := ucpayment.NewGetConfigPagamento(configPagRepo)
+
+	paymentHandler := handler.NewPaymentHandler(
+		createPayUC, getPayUC, listPayUC, updatePayUC, deletePayUC,
+		confirmarPayUC, upsertCfgPayUC, getCfgPayUC,
+	)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -195,6 +215,7 @@ func main() {
 		eventoHandler.RegisterEventRoutes(r)
 		draftHandler.RegisterDraftRoutes(r)
 		rateioHandler.RegisterRateioRoutes(r)
+		paymentHandler.RegisterPaymentRoutes(r)
 	})
 
 	// --- HTTP server ---
