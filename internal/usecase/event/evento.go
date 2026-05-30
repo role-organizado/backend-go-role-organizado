@@ -8,6 +8,7 @@ import (
 	portin "github.com/role-organizado/backend-go-role-organizado/internal/port/in"
 	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
+	"github.com/role-organizado/backend-go-role-organizado/pkg/tracing"
 )
 
 // ---- CreateEvento ----
@@ -24,6 +25,8 @@ func NewCreateEvento(e portout.EventoRepository) *CreateEvento {
 
 // Execute creates a new event owned by the given user.
 func (uc *CreateEvento) Execute(ctx context.Context, in portin.CreateEventoInput) (*domain.Evento, error) {
+	ctx, span := tracing.StartSpan(ctx, "usecase.event.create", tracing.UserID(in.UsuarioID))
+	defer span.End()
 	now := time.Now()
 	e := &domain.Evento{
 		UsuarioID:            in.UsuarioID,
@@ -176,6 +179,8 @@ func NewDeleteEvento(e portout.EventoRepository) *DeleteEvento {
 
 // Execute deletes an event, enforcing ownership.
 func (uc *DeleteEvento) Execute(ctx context.Context, id, requesterID string) error {
+	ctx, span := tracing.StartSpan(ctx, "usecase.event.delete", tracing.EventID(id), tracing.UserID(requesterID))
+	defer span.End()
 	evt, err := uc.eventos.FindByID(ctx, id)
 	if err != nil {
 		return err

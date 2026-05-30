@@ -228,6 +228,7 @@ func main() {
 	r.Use(chimiddleware.RealIP)
 	r.Use(middleware.ErrorHandler)
 	r.Use(middleware.StructuredLogger(logger))
+	r.Use(middleware.Metrics)
 	r.Use(middleware.CORS(cfg.Server.CORSOrigins))
 	r.Use(chimiddleware.Recoverer)
 

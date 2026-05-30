@@ -13,6 +13,7 @@ import (
 	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 	"github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
+	"github.com/role-organizado/backend-go-role-organizado/pkg/tracing"
 )
 
 // Login implements portin.LoginUseCase.
@@ -29,6 +30,8 @@ func NewLogin(u portout.UsuarioRepository, rt portout.RefreshTokenRepository, j 
 
 // Execute authenticates the user with email+password and returns a token pair.
 func (uc *Login) Execute(ctx context.Context, in portin.LoginInput) (*portin.AuthOutput, error) {
+	ctx, span := tracing.StartSpan(ctx, "usecase.auth.login")
+	defer span.End()
 	slog.InfoContext(ctx, "login attempt", "email", in.Email)
 
 	usuario, err := uc.usuarios.FindByEmail(ctx, in.Email)
@@ -40,6 +43,7 @@ func (uc *Login) Execute(ctx context.Context, in portin.LoginInput) (*portin.Aut
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(usuario.SenhaHash), []byte(in.Senha)); err != nil {
+		tracing.RecordError(span, err)
 		return nil, apierr.Unauthorized("credenciais inválidas")
 	}
 

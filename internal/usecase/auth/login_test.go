@@ -124,8 +124,8 @@ func TestLogin_Success(t *testing.T) {
 		Roles:     []domain.Role{domain.RoleUser},
 	}
 
-	uRepo.On("FindByEmail", ctx, "user@example.com").Return(usuario, nil)
-	rtRepo.On("Save", ctx, mock.Anything).Return(&domain.RefreshToken{
+	uRepo.On("FindByEmail", mock.Anything, "user@example.com").Return(usuario, nil)
+	rtRepo.On("Save", mock.Anything, mock.Anything).Return(&domain.RefreshToken{
 		ID:        "rt1",
 		UsuarioID: "abc123",
 		Token:     "some-refresh-token",
@@ -150,7 +150,7 @@ func TestLogin_WrongPassword_ReturnsUnauthorized(t *testing.T) {
 
 	hash, _ := bcrypt.GenerateFromPassword([]byte("correct"), bcrypt.DefaultCost)
 	usuario := &domain.Usuario{ID: "1", Email: "a@b.com", SenhaHash: string(hash)}
-	uRepo.On("FindByEmail", ctx, "a@b.com").Return(usuario, nil)
+	uRepo.On("FindByEmail", mock.Anything, "a@b.com").Return(usuario, nil)
 
 	_, err := uc.Execute(ctx, portin.LoginInput{Email: "a@b.com", Senha: "wrong"})
 	require.Error(t, err)
@@ -164,7 +164,7 @@ func TestLogin_UserNotFound_ReturnsUnauthorized(t *testing.T) {
 	uc := ucauth.NewLogin(uRepo, rtRepo, jwtSvc)
 	ctx := context.Background()
 
-	uRepo.On("FindByEmail", ctx, "noone@example.com").Return(nil, apierr.NotFound("usuario", "noone@example.com"))
+	uRepo.On("FindByEmail", mock.Anything, "noone@example.com").Return(nil, apierr.NotFound("usuario", "noone@example.com"))
 
 	_, err := uc.Execute(ctx, portin.LoginInput{Email: "noone@example.com", Senha: "x"})
 	require.Error(t, err)
@@ -180,14 +180,14 @@ func TestRegister_Success_CreatesUserAndIssuesTokens(t *testing.T) {
 	uc := ucauth.NewRegister(uRepo, rtRepo, jwtSvc)
 	ctx := context.Background()
 
-	uRepo.On("FindByEmail", ctx, "new@example.com").Return(nil, apierr.NotFound("u", "x"))
-	uRepo.On("Save", ctx, mock.Anything).Return(&domain.Usuario{
+	uRepo.On("FindByEmail", mock.Anything, "new@example.com").Return(nil, apierr.NotFound("u", "x"))
+	uRepo.On("Save", mock.Anything, mock.Anything).Return(&domain.Usuario{
 		ID:    "new_id",
 		Email: "new@example.com",
 		Nome:  "New User",
 		Roles: []domain.Role{domain.RoleUser},
 	}, nil)
-	rtRepo.On("Save", ctx, mock.Anything).Return(&domain.RefreshToken{
+	rtRepo.On("Save", mock.Anything, mock.Anything).Return(&domain.RefreshToken{
 		Token:     "token",
 		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}, nil)
@@ -205,7 +205,7 @@ func TestRegister_EmailAlreadyExists_ReturnsConflict(t *testing.T) {
 	uc := ucauth.NewRegister(uRepo, rtRepo, jwtSvc)
 	ctx := context.Background()
 
-	uRepo.On("FindByEmail", ctx, "exists@example.com").Return(&domain.Usuario{ID: "1"}, nil)
+	uRepo.On("FindByEmail", mock.Anything, "exists@example.com").Return(&domain.Usuario{ID: "1"}, nil)
 
 	_, err := uc.Execute(ctx, portin.RegisterInput{Email: "exists@example.com", Senha: "x", Nome: "n"})
 	require.Error(t, err)
@@ -221,7 +221,7 @@ func TestLogout_RevokesAllTokens(t *testing.T) {
 	uc := ucauth.NewLogout(rtRepo)
 	ctx := context.Background()
 
-	rtRepo.On("RevokeAllForUser", ctx, "uid1").Return(nil)
+	rtRepo.On("RevokeAllForUser", mock.Anything, "uid1").Return(nil)
 
 	err := uc.Execute(ctx, "uid1")
 	require.NoError(t, err)
