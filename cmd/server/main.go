@@ -30,6 +30,8 @@ import (
 	ucauth "github.com/role-organizado/backend-go-role-organizado/internal/usecase/auth"
 	// Phase 3
 	ucevent "github.com/role-organizado/backend-go-role-organizado/internal/usecase/event"
+	// Phase 4
+	ucrateio "github.com/role-organizado/backend-go-role-organizado/internal/usecase/rateio"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -150,6 +152,24 @@ func main() {
 		createDraftUC, getDraftUC, listDraftsUC, updateDraftUC, deleteDraftUC, publishDraftUC,
 	)
 
+	// --- Phase 4: Rateios domain ---
+	rateioRepo := mongodb.NewRateioRepository(mongoClient)
+	fechamentoRepo := mongodb.NewRateioFechamentoRepository(mongoClient)
+
+	createRateioUC := ucrateio.NewCreateRateio(rateioRepo)
+	getRateioUC := ucrateio.NewGetRateio(rateioRepo)
+	listRateiosUC := ucrateio.NewListRateios(rateioRepo)
+	updateRateioUC := ucrateio.NewUpdateRateio(rateioRepo)
+	deleteRateioUC := ucrateio.NewDeleteRateio(rateioRepo)
+	previewRateioUC := ucrateio.NewPreviewRateio(rateioRepo)
+	fecharRateioUC := ucrateio.NewFecharRateio(rateioRepo, fechamentoRepo)
+	getFechamentosUC := ucrateio.NewGetFechamentos(rateioRepo, fechamentoRepo)
+
+	rateioHandler := handler.NewRateioHandler(
+		createRateioUC, getRateioUC, listRateiosUC, updateRateioUC, deleteRateioUC,
+		previewRateioUC, fecharRateioUC, getFechamentosUC,
+	)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -174,6 +194,7 @@ func main() {
 		usuarioHandler.RegisterRoutes(r)
 		eventoHandler.RegisterEventRoutes(r)
 		draftHandler.RegisterDraftRoutes(r)
+		rateioHandler.RegisterRateioRoutes(r)
 	})
 
 	// --- HTTP server ---
