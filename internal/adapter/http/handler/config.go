@@ -49,7 +49,11 @@ func (h *ConfigHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/dominios", h.ListDominios)
 	r.Get("/api/v1/dominios/{categoria}/{chave}", h.GetDominio)
 
+	// UI theme config (authenticated, all roles)
+	r.Get("/api/v1/config/ui-theme", h.GetUIThemeConfig)
+
 	// Admin CRUD — require ADMIN role (guarded by RequireRole middleware applied in main.go)
+	r.Get("/api/v1/admin/dominios", h.ListAllDominios) // Admin: lista todos incluindo inativos
 	r.Post("/api/v1/admin/dominios", h.UpsertDominio)
 	r.Put("/api/v1/admin/dominios/{id}", h.UpsertDominio)
 	r.Delete("/api/v1/admin/dominios/{id}", h.DeleteDominio)
@@ -61,17 +65,17 @@ func (h *ConfigHandler) RegisterRoutes(r chi.Router) {
 
 // dominioResponse is the JSON representation sent to clients.
 type dominioResponse struct {
-	ID        string         `json:"id"`
-	Categoria string         `json:"categoria"`
-	Chave     string         `json:"chave"`
-	Valor     string         `json:"valor"`
-	Descricao string         `json:"descricao,omitempty"`
-	Icone     string         `json:"icone,omitempty"`
-	Ordem     int            `json:"ordem"`
-	Ativo     bool           `json:"ativo"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	CriadoEm  time.Time      `json:"criadoEm"`
-	UpdatedAt time.Time      `json:"updatedAt"`
+	ID          string         `json:"id"`
+	Categoria   string         `json:"categoria"`
+	Chave       string         `json:"chave"`
+	Valor       string         `json:"valor"`
+	Descricao   string         `json:"descricao,omitempty"`
+	Icone       string         `json:"icone,omitempty"`
+	Ordem       int            `json:"ordem"`
+	Ativo       bool           `json:"ativo"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CriadoEm    time.Time      `json:"criadoEm"`
+	AtualizadoEm time.Time     `json:"atualizadoEm"`
 }
 
 type dominioUpsertRequest struct {
@@ -231,6 +235,22 @@ func (h *ConfigHandler) UpsertConfigSistema(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, toConfigSistemaResponse(*saved))
 }
 
+// GetUIThemeConfig handles GET /api/v1/config/ui-theme.
+// Returns UI theme configuration — tries to fetch from DB, falls back to defaults.
+func (h *ConfigHandler) GetUIThemeConfig(w http.ResponseWriter, r *http.Request) {
+	c, err := h.getConfig.Execute(r.Context(), "UI_THEME_CONFIG")
+	if err != nil {
+		// Return default theme config if not found
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"chave": "UI_THEME_CONFIG",
+			"valor": `{"primaryColor":"#0066ff","accentColor":"#8a2be2"}`,
+			"ativo": true,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, toConfigSistemaResponse(*c))
+}
+
 // ---- mappers ----
 
 func toDominioResponse(d config.Dominio) dominioResponse {
@@ -245,8 +265,27 @@ func toDominioResponse(d config.Dominio) dominioResponse {
 		Ativo:     d.Ativo,
 		Metadata:  d.Metadata,
 		CriadoEm:  d.CriadoEm,
-		UpdatedAt: d.UpdatedAt,
+		AtualizadoEm: d.UpdatedAt,
 	}
+}
+
+// ListAllDominios handles GET /api/v1/admin/dominios — returns all dominios including inactive.
+func (h *ConfigHandler) ListAllDominios(w http.ResponseWriter, r *http.Request) {
+	// Reuse ListDominiosUseCase without ativo filter to return all records
+	in := portin.ListDominiosInput{}
+	if v := r.URL.Query().Get("categoria"); v != "" {
+		in.Categoria = &v
+	}
+	dominios, err := h.listDominios.Execute(r.Context(), in)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	resp := make([]dominioResponse, len(dominios))
+	for i, d := range dominios {
+		resp[i] = toDominioResponse(d)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func toConfigSistemaResponse(c config.ConfiguracaoSistema) configSistemaResponse {
