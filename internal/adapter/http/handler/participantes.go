@@ -115,20 +115,19 @@ func (h *ParticipantesHandler) BuscarRecentes(w http.ResponseWriter, r *http.Req
 	var usuarios []bson.M
 	_ = usersCursor.All(ctx, &usuarios)
 
-	// Build response with sugestão format
+	// Build response with sugestão format — matches Java's ParticipanteRecenteDTO
+	// Java fields: nome, telefone, email, quantidadeEventosRecentes (camelCase), jaCadastrado (camelCase)
 	sugestoes := make([]bson.M, 0, len(usuarios))
 	for _, u := range usuarios {
 		uid := binaryToUUIDString(u["_id"])
 		count := userIDCounts[uid]
 
 		sugestao := bson.M{
-			"id":                      uid,
 			"nome":                    u["nome"],
 			"telefone":                u["telefone"],
 			"email":                   u["email"],
-			"fotoPerfil":              u["foto_perfil"],
-			"quantidade_eventos_recentes": count,
-			"ja_cadastrado":           true,
+			"quantidadeEventosRecentes": count,
+			"jaCadastrado":            true,
 		}
 		sugestoes = append(sugestoes, sugestao)
 	}
