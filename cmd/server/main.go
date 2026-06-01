@@ -41,6 +41,8 @@ import (
 	ucstorage "github.com/role-organizado/backend-go-role-organizado/internal/usecase/storage"
 	// Cofrinho
 	uccofrinho "github.com/role-organizado/backend-go-role-organizado/internal/usecase/cofrinho"
+	// Lista Presentes
+	uclistapresentes "github.com/role-organizado/backend-go-role-organizado/internal/usecase/listapresentes"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -91,8 +93,8 @@ func main() {
 		slog.Error("migration v082 failed", "error", err)
 		os.Exit(1)
 	}
-	if err := migrations.RunV082CreateCofrinhoCollection(ctx, mongoClient.DB()); err != nil {
-		slog.Error("migration v082 failed", "error", err)
+	if err := migrations.RunV083CreateListaPresentesCollection(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v083 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -243,6 +245,15 @@ func main() {
 	confirmarContribuicaoUC := uccofrinho.NewConfirmarContribuicao(cofrinhoRepo)
 	cofrinhoHandler := handler.NewCofrinhoHandler(createContribuicaoUC, listContribuicoesUC, confirmarContribuicaoUC)
 
+	// --- Lista Presentes domain ---
+	listaPresentesRepo := mongodb.NewListaPresentesRepository(mongoClient)
+	addItemUC := uclistapresentes.NewAddItem(listaPresentesRepo, eventoRepo)
+	getItemUC := uclistapresentes.NewGetItem(listaPresentesRepo)
+	listItemsUC := uclistapresentes.NewListItems(listaPresentesRepo)
+	reservarItemUC := uclistapresentes.NewReservarItem(listaPresentesRepo)
+	removeItemUC := uclistapresentes.NewRemoveItem(listaPresentesRepo)
+	listaPresentesHandler := handler.NewListaPresentesHandler(addItemUC, getItemUC, listItemsUC, reservarItemUC, removeItemUC)
+
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
@@ -284,12 +295,12 @@ func main() {
 		storageHandler.RegisterStorageRoutes(r)
 		workflowProxyHandler.RegisterWorkflowRoutes(r)
 		cofrinhoHandler.RegisterCofrinhoRoutes(r)
+		listaPresentesHandler.RegisterListaPresentesRoutes(r)
 		financeHandler.RegisterFinanceRoutes(r)
 		adminHandler.RegisterAdminRoutes(r)
 		participantesHandler.RegisterParticipantesRoutes(r)
 		usuariosEventoHandler.RegisterUsuariosEventoRoutes(r)
 		approvalsHandler.RegisterApprovalsRoutes(r)
-		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 	})
 
 	// --- HTTP server ---
