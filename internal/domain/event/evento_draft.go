@@ -34,6 +34,10 @@ type EventoDraft struct {
 	RegrasCustomizadas   string
 	PoliticaCancelamento string
 
+	// Nicho modules
+	ModulosAtivos     []string       // active niche modules (e.g. COFRINHO, LISTA_COLABORATIVA)
+	ConfiguracaoNicho map[string]any // niche-specific configuration
+
 	// Wizard state
 	EtapaAtual      int
 	EtapasCompletas []int

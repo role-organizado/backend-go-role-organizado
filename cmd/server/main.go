@@ -22,6 +22,7 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
+	"github.com/role-organizado/backend-go-role-organizado/migrations"
 	pkgjwt "github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
 
 	// Phase 1
@@ -76,6 +77,12 @@ func main() {
 	mongoClient, err := mongodb.Connect(ctx, cfg.MongoDB.URI, cfg.MongoDB.Database)
 	if err != nil {
 		slog.Error("connecting to mongodb", "error", err)
+		os.Exit(1)
+	}
+
+	// Run Go migrations at startup.
+	if err := migrations.RunV081NichoBabyShower(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v081 failed", "error", err)
 		os.Exit(1)
 	}
 

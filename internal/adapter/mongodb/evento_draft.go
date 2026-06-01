@@ -50,6 +50,10 @@ type eventoDraftDocument struct {
 	RegrasCustomizadas   []string `bson:"regrasCustomizadas"`
 	PoliticaCancelamento string   `bson:"politicaCancelamento"`
 
+	// Nicho modules
+	ModulosAtivos     []string       `bson:"modulos_ativos,omitempty"`
+	ConfiguracaoNicho map[string]any `bson:"configuracao_nicho,omitempty"`
+
 	// Wizard state
 	EtapaAtual      int   `bson:"etapaAtual"` // camelCase: matches Java MongoDB schema
 	EtapasCompletas []int `bson:"etapasCompletas"`
@@ -185,6 +189,10 @@ func draftFromDoc(doc eventoDraftDocument) domain.EventoDraft {
 	if etapasCompletas == nil {
 		etapasCompletas = []int{}
 	}
+	modulosAtivos := doc.ModulosAtivos
+	if modulosAtivos == nil {
+		modulosAtivos = []string{}
+	}
 	return domain.EventoDraft{
 		ID:                   doc.ID.Hex(),
 		UsuarioID:            doc.UsuarioID,
@@ -206,6 +214,8 @@ func draftFromDoc(doc eventoDraftDocument) domain.EventoDraft {
 		PoliticaCancelamento: doc.PoliticaCancelamento,
 		EtapaAtual:           doc.EtapaAtual,
 		EtapasCompletas:      etapasCompletas,
+		ModulosAtivos:        modulosAtivos,
+		ConfiguracaoNicho:    doc.ConfiguracaoNicho,
 		CriadoEm:             doc.CriadoEm,
 		UpdatedAt:            doc.AtualizadoEm,
 	}
@@ -232,6 +242,10 @@ func draftToDoc(d *domain.EventoDraft) eventoDraftDocument {
 	etapasCompletas := d.EtapasCompletas
 	if etapasCompletas == nil {
 		etapasCompletas = []int{}
+	}
+	modulosAtivos := d.ModulosAtivos
+	if modulosAtivos == nil {
+		modulosAtivos = []string{}
 	}
 	// regrasCustomizadas is stored as []string in MongoDB (Java compat) but domain uses string
 	var regrasCustomizadas []string
@@ -260,6 +274,8 @@ func draftToDoc(d *domain.EventoDraft) eventoDraftDocument {
 		PoliticaCancelamento: d.PoliticaCancelamento,
 		EtapaAtual:           d.EtapaAtual,
 		EtapasCompletas:      etapasCompletas,
+		ModulosAtivos:        modulosAtivos,
+		ConfiguracaoNicho:    d.ConfiguracaoNicho,
 		CriadoEm:             d.CriadoEm,
 		AtualizadoEm:         d.UpdatedAt,
 	}
