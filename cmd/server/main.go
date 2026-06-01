@@ -22,6 +22,7 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
+	"github.com/role-organizado/backend-go-role-organizado/migrations"
 	pkgjwt "github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
 
 	// Phase 1
@@ -38,6 +39,10 @@ import (
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
 	// Phase 7
 	ucstorage "github.com/role-organizado/backend-go-role-organizado/internal/usecase/storage"
+	// Cofrinho
+	uccofrinho "github.com/role-organizado/backend-go-role-organizado/internal/usecase/cofrinho"
+	// Lista Presentes
+	uclistapresentes "github.com/role-organizado/backend-go-role-organizado/internal/usecase/listapresentes"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -76,6 +81,20 @@ func main() {
 	mongoClient, err := mongodb.Connect(ctx, cfg.MongoDB.URI, cfg.MongoDB.Database)
 	if err != nil {
 		slog.Error("connecting to mongodb", "error", err)
+		os.Exit(1)
+	}
+
+	// Run Go migrations at startup.
+	if err := migrations.RunV081NichoBabyShower(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v081 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV082CreateCofrinhoCollection(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v082 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV083CreateListaPresentesCollection(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v083 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -219,6 +238,22 @@ func main() {
 	deleteArquivoUC := ucstorage.NewDeleteArquivo(arquivoRepo, gridfsStorage)
 	storageHandler := handler.NewStorageHandler(uploadUC, downloadUC, deleteArquivoUC)
 
+	// --- Cofrinho domain ---
+	cofrinhoRepo := mongodb.NewCofrinhoRepository(mongoClient)
+	createContribuicaoUC := uccofrinho.NewCreateContribuicao(cofrinhoRepo)
+	listContribuicoesUC := uccofrinho.NewListContribuicoes(cofrinhoRepo)
+	confirmarContribuicaoUC := uccofrinho.NewConfirmarContribuicao(cofrinhoRepo)
+	cofrinhoHandler := handler.NewCofrinhoHandler(createContribuicaoUC, listContribuicoesUC, confirmarContribuicaoUC)
+
+	// --- Lista Presentes domain ---
+	listaPresentesRepo := mongodb.NewListaPresentesRepository(mongoClient)
+	addItemUC := uclistapresentes.NewAddItem(listaPresentesRepo, eventoRepo)
+	getItemUC := uclistapresentes.NewGetItem(listaPresentesRepo)
+	listItemsUC := uclistapresentes.NewListItems(listaPresentesRepo)
+	reservarItemUC := uclistapresentes.NewReservarItem(listaPresentesRepo)
+	removeItemUC := uclistapresentes.NewRemoveItem(listaPresentesRepo)
+	listaPresentesHandler := handler.NewListaPresentesHandler(addItemUC, getItemUC, listItemsUC, reservarItemUC, removeItemUC)
+
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
@@ -259,6 +294,8 @@ func main() {
 		notificationHandler.RegisterNotificationRoutes(r)
 		storageHandler.RegisterStorageRoutes(r)
 		workflowProxyHandler.RegisterWorkflowRoutes(r)
+		cofrinhoHandler.RegisterCofrinhoRoutes(r)
+		listaPresentesHandler.RegisterListaPresentesRoutes(r)
 		financeHandler.RegisterFinanceRoutes(r)
 		adminHandler.RegisterAdminRoutes(r)
 		participantesHandler.RegisterParticipantesRoutes(r)

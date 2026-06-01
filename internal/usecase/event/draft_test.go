@@ -11,6 +11,7 @@ import (
 
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/event"
 	portin "github.com/role-organizado/backend-go-role-organizado/internal/port/in"
+	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 	usecase "github.com/role-organizado/backend-go-role-organizado/internal/usecase/event"
 	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
@@ -78,6 +79,10 @@ func (m *mockEventoRepoForPublish) Save(ctx context.Context, e *domain.Evento) (
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*domain.Evento), args.Error(1)
+}
+
+func (m *mockEventoRepoForPublish) FindByUsuarioIDCursor(ctx context.Context, usuarioID string, filtros portout.EventoQueryFiltros) (portout.EventosCursorPage, error) {
+	return portout.EventosCursorPage{}, nil
 }
 
 func (m *mockEventoRepoForPublish) Update(ctx context.Context, e *domain.Evento) (*domain.Evento, error) {

@@ -36,6 +36,8 @@ type eventoDocument struct {
 	RateiosHabilitado    bool        `bson:"rateios_habilitado,omitempty"`
 	PagamentosHabilitado bool        `bson:"pagamentos_habilitado,omitempty"`
 	ImageURL             string      `bson:"image_url,omitempty"`
+	ModulosAtivos        []string       `bson:"modulos_ativos,omitempty"`
+	ConfiguracaoNicho    map[string]any `bson:"configuracao_nicho,omitempty"`
 	CriadoEm            time.Time   `bson:"criado_em,omitempty"`
 	AtualizadoEm        time.Time   `bson:"atualizado_em,omitempty"` // Java: atualizado_em (not "updated_at")
 }
@@ -284,6 +286,8 @@ func eventoFromDoc(doc eventoDocument) domain.Evento {
 		RateiosHabilitado:    doc.RateiosHabilitado,
 		PagamentosHabilitado: doc.PagamentosHabilitado,
 		PoliticaCancelamento: doc.PoliticaCancelamento,
+		ModulosAtivos:        doc.ModulosAtivos,
+		ConfiguracaoNicho:    doc.ConfiguracaoNicho,
 		CriadoEm:             doc.CriadoEm,
 		UpdatedAt:            doc.AtualizadoEm,
 	}

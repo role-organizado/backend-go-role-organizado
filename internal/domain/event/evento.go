@@ -23,6 +23,8 @@ type Evento struct {
 	PrazoPagamento      *time.Time
 	RegrasCustomizadas  string
 	PoliticaCancelamento string
+	ModulosAtivos       []string       // active niche modules (e.g. COFRINHO, LISTA_COLABORATIVA)
+	ConfiguracaoNicho   map[string]any // niche-specific configuration
 	CriadoEm           time.Time
 	UpdatedAt           time.Time
 }
