@@ -39,6 +39,8 @@ import (
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
 	// Phase 7
 	ucstorage "github.com/role-organizado/backend-go-role-organizado/internal/usecase/storage"
+	// Cofrinho
+	uccofrinho "github.com/role-organizado/backend-go-role-organizado/internal/usecase/cofrinho"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -83,6 +85,14 @@ func main() {
 	// Run Go migrations at startup.
 	if err := migrations.RunV081NichoBabyShower(ctx, mongoClient.DB()); err != nil {
 		slog.Error("migration v081 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV082CreateCofrinhoCollection(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v082 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV082CreateCofrinhoCollection(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v082 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -226,6 +236,13 @@ func main() {
 	deleteArquivoUC := ucstorage.NewDeleteArquivo(arquivoRepo, gridfsStorage)
 	storageHandler := handler.NewStorageHandler(uploadUC, downloadUC, deleteArquivoUC)
 
+	// --- Cofrinho domain ---
+	cofrinhoRepo := mongodb.NewCofrinhoRepository(mongoClient)
+	createContribuicaoUC := uccofrinho.NewCreateContribuicao(cofrinhoRepo)
+	listContribuicoesUC := uccofrinho.NewListContribuicoes(cofrinhoRepo)
+	confirmarContribuicaoUC := uccofrinho.NewConfirmarContribuicao(cofrinhoRepo)
+	cofrinhoHandler := handler.NewCofrinhoHandler(createContribuicaoUC, listContribuicoesUC, confirmarContribuicaoUC)
+
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
@@ -266,11 +283,13 @@ func main() {
 		notificationHandler.RegisterNotificationRoutes(r)
 		storageHandler.RegisterStorageRoutes(r)
 		workflowProxyHandler.RegisterWorkflowRoutes(r)
+		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 		financeHandler.RegisterFinanceRoutes(r)
 		adminHandler.RegisterAdminRoutes(r)
 		participantesHandler.RegisterParticipantesRoutes(r)
 		usuariosEventoHandler.RegisterUsuariosEventoRoutes(r)
 		approvalsHandler.RegisterApprovalsRoutes(r)
+		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 	})
 
 	// --- HTTP server ---
