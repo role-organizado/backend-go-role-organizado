@@ -204,6 +204,46 @@ func (uc *DeleteDraft) Execute(ctx context.Context, id, requesterID string) erro
 	return uc.drafts.DeleteByID(ctx, id)
 }
 
+// ---- ValidateDraft ----
+
+// ValidateDraft implements portin.ValidateDraftUseCase.
+// Checks whether the required fields of a draft are filled in.
+type ValidateDraft struct {
+	drafts portout.EventoDraftRepository
+}
+
+// NewValidateDraft creates a new ValidateDraft use case.
+func NewValidateDraft(d portout.EventoDraftRepository) *ValidateDraft {
+	return &ValidateDraft{drafts: d}
+}
+
+// Execute validates a draft's required fields and returns one result per checked field.
+// Returns apierr.Forbidden if the requester is not the owner.
+func (uc *ValidateDraft) Execute(ctx context.Context, id, requesterID string) ([]portin.ValidationResult, error) {
+	d, err := uc.drafts.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !d.IsOwner(requesterID) {
+		return nil, apierr.Forbidden("acesso negado")
+	}
+
+	results := []portin.ValidationResult{
+		{Field: "nome", Valid: d.Nome != "", Message: nonEmptyMsg(d.Nome != "", "Título é obrigatório")},
+		{Field: "tipo", Valid: d.Tipo != "", Message: nonEmptyMsg(d.Tipo != "", "Tipo do evento é obrigatório")},
+		{Field: "data", Valid: d.Data != nil, Message: nonEmptyMsg(d.Data != nil, "Data do evento é obrigatória")},
+		{Field: "local", Valid: d.Local != "", Message: nonEmptyMsg(d.Local != "", "Local é obrigatório")},
+	}
+	return results, nil
+}
+
+func nonEmptyMsg(valid bool, msg string) string {
+	if valid {
+		return ""
+	}
+	return msg
+}
+
 // ---- PublishDraft ----
 
 // PublishDraft implements portin.PublishDraftUseCase.

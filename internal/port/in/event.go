@@ -167,3 +167,16 @@ type DeleteDraftUseCase interface {
 type PublishDraftUseCase interface {
 	Execute(ctx context.Context, draftID, requesterID string) (*event.Evento, error)
 }
+
+// ValidationResult holds the outcome of a single draft field validation.
+type ValidationResult struct {
+	Field   string `json:"field"`
+	Valid   bool   `json:"valid"`
+	Message string `json:"message,omitempty"`
+}
+
+// ValidateDraftUseCase validates that a draft has all required fields filled in.
+// Returns a slice of ValidationResult — one per checked field.
+type ValidateDraftUseCase interface {
+	Execute(ctx context.Context, id, requesterID string) ([]ValidationResult, error)
+}

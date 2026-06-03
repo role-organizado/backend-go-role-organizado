@@ -169,6 +169,7 @@ func main() {
 	updateDraftUC := ucevent.NewUpdateDraft(draftRepo)
 	deleteDraftUC := ucevent.NewDeleteDraft(draftRepo)
 	publishDraftUC := ucevent.NewPublishDraft(draftRepo, eventoRepo)
+	validateDraftUC := ucevent.NewValidateDraft(draftRepo)
 
 	// --- Phase 3: HTTP Handlers ---
 	eventoHandler := handler.NewEventHandler(
@@ -177,6 +178,7 @@ func main() {
 	)
 	draftHandler := handler.NewDraftHandler(
 		createDraftUC, getDraftUC, listDraftsUC, updateDraftUC, deleteDraftUC, publishDraftUC,
+		validateDraftUC,
 	)
 
 	// --- Phase 4: Rateios domain ---
