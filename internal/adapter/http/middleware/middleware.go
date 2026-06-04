@@ -140,6 +140,12 @@ func UserIDFromContext(ctx context.Context) string {
 	return v
 }
 
+// ContextWithUserID returns a new context with the given user ID set.
+// Intended for use in tests that need to simulate an authenticated request.
+func ContextWithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, contextKeyUserID, userID)
+}
+
 // ClaimsFromContext extracts the JWT claims from the request context.
 // Returns nil if not authenticated.
 func ClaimsFromContext(ctx context.Context) *pkgjwt.Claims {

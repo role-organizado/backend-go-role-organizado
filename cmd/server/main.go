@@ -147,7 +147,7 @@ func main() {
 		loginUC, registerUC, refreshUC, validateUC, logoutUC, googleUC, appleUC,
 	)
 	usuarioHandler := handler.NewUsuarioHandler(
-		getUsuarioUC, updateUsuarioUC, listUsuariosUC, updateRoleUC,
+		getUsuarioUC, updateUsuarioUC, listUsuariosUC, updateRoleUC, mongoClient,
 	)
 
 	// --- Phase 3: Events & Drafts domain repositories ---
@@ -264,6 +264,10 @@ func main() {
 	usuariosEventoHandler := handler.NewUsuariosEventoHandler(mongoClient)
 	approvalsHandler := handler.NewApprovalsHandler(mongoClient)
 
+	// --- Misc handlers (Bloco 3d parity) ---
+	cardapioHandler := handler.NewCardapioHandler(mongoClient)
+	outboundRequestHandler := handler.NewOutboundRequestHandler(mongoClient)
+
 	// Build chi router.
 	r := chi.NewRouter()
 
@@ -282,6 +286,7 @@ func main() {
 	// --- Public routes (no JWT required) ---
 	authHandler.RegisterRoutes(r)
 	configHandler.RegisterRoutes(r) // GET /api/v1/dominios (public read) + admin write
+	cardapioHandler.RegisterCardapioRoutes(r) // GET /api/cardapios (public — Java parity)
 
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {
@@ -301,6 +306,7 @@ func main() {
 		participantesHandler.RegisterParticipantesRoutes(r)
 		usuariosEventoHandler.RegisterUsuariosEventoRoutes(r)
 		approvalsHandler.RegisterApprovalsRoutes(r)
+		outboundRequestHandler.RegisterOutboundRequestRoutes(r)
 	})
 
 	// --- HTTP server ---
