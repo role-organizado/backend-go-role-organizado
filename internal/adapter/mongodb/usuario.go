@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -61,6 +62,31 @@ type usuarioDocument struct {
 	Ativo          bool               `bson:"ativo"`
 	CriadoEm      time.Time          `bson:"criado_em"`
 	UpdatedAt      time.Time          `bson:"updated_at"`
+}
+
+// userIDValue converts a user ID string to its appropriate BSON value for storage,
+// preserving round-trip fidelity when read back via rawIDToString.
+//
+// Rules:
+//   - 24-char hex → bson.ObjectID (for Go-created users whose _id is ObjectID)
+//   - UUID string (8-4-4-4-12) → bson.Binary{Subtype: 4}
+//   - Anything else → the string itself
+//
+// This is critical for ownership checks: rawIDToString(userIDValue(id)) == id.
+func userIDValue(id string) interface{} {
+	if id == "" {
+		return nil
+	}
+	// Try as ObjectID hex (exactly 24 hex chars)
+	if oid, err := bson.ObjectIDFromHex(id); err == nil {
+		return oid
+	}
+	// Try as UUID string (8-4-4-4-12 format)
+	if u, err := uuid.Parse(id); err == nil {
+		b := [16]byte(u)
+		return bson.Binary{Subtype: 0x04, Data: b[:]}
+	}
+	return id
 }
 
 // rawIDToString converts any MongoDB _id value to a string representation.
