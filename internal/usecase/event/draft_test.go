@@ -271,3 +271,106 @@ func TestPublishDraft_Forbidden(t *testing.T) {
 	assert.ErrorAs(t, err, &ae)
 	assert.Equal(t, 403, ae.Status)
 }
+
+// ---- ValidateDraft ----
+
+func TestValidateDraft_AllFieldsValid(t *testing.T) {
+	draftRepo := new(mockDraftRepo)
+	uc := usecase.NewValidateDraft(draftRepo)
+
+	now := time.Now()
+	d := &domain.EventoDraft{
+		ID:        "d-1",
+		UsuarioID: "user-1",
+		Nome:      "Festa de Aniversário",
+		Tipo:      "FESTA",
+		Data:      &now,
+		Local:     "Minha Casa",
+		UpdatedAt: now,
+		CriadoEm: now,
+	}
+	draftRepo.On("FindByID", mock.Anything, "d-1").Return(d, nil)
+
+	results, err := uc.Execute(context.Background(), "d-1", "user-1")
+	require.NoError(t, err)
+	require.Len(t, results, 4)
+
+	for _, res := range results {
+		assert.True(t, res.Valido, "campo %q deveria ser válido", res.Campo)
+		assert.Empty(t, res.Mensagem)
+	}
+}
+
+func TestValidateDraft_MissingRequiredFields(t *testing.T) {
+	draftRepo := new(mockDraftRepo)
+	uc := usecase.NewValidateDraft(draftRepo)
+
+	// Draft with no fields filled
+	d := &domain.EventoDraft{
+		ID:        "d-1",
+		UsuarioID: "user-1",
+	}
+	draftRepo.On("FindByID", mock.Anything, "d-1").Return(d, nil)
+
+	results, err := uc.Execute(context.Background(), "d-1", "user-1")
+	require.NoError(t, err)
+	require.Len(t, results, 4)
+
+	invalidCampos := map[string]bool{}
+	for _, res := range results {
+		if !res.Valido {
+			invalidCampos[res.Campo] = true
+			assert.NotEmpty(t, res.Mensagem, "campo %q inválido deveria ter mensagem", res.Campo)
+		}
+	}
+
+	assert.True(t, invalidCampos["nome"], "nome deveria ser inválido")
+	assert.True(t, invalidCampos["tipo"], "tipo deveria ser inválido")
+	assert.True(t, invalidCampos["data"], "data deveria ser inválida")
+	assert.True(t, invalidCampos["local"], "local deveria ser inválido")
+}
+
+func TestValidateDraft_PartiallyValid(t *testing.T) {
+	draftRepo := new(mockDraftRepo)
+	uc := usecase.NewValidateDraft(draftRepo)
+
+	now := time.Now()
+	d := &domain.EventoDraft{
+		ID:        "d-1",
+		UsuarioID: "user-1",
+		Nome:      "Evento com nome",
+		Tipo:      "FESTA",
+		Data:      nil,  // faltando
+		Local:     "",   // faltando
+	}
+	draftRepo.On("FindByID", mock.Anything, "d-1").Return(d, nil)
+	_ = now
+
+	results, err := uc.Execute(context.Background(), "d-1", "user-1")
+	require.NoError(t, err)
+	require.Len(t, results, 4)
+
+	byField := map[string]portin.DraftValidationResult{}
+	for _, r := range results {
+		byField[r.Campo] = r
+	}
+
+	assert.True(t, byField["nome"].Valido)
+	assert.True(t, byField["tipo"].Valido)
+	assert.False(t, byField["data"].Valido)
+	assert.False(t, byField["local"].Valido)
+}
+
+func TestValidateDraft_Forbidden(t *testing.T) {
+	draftRepo := new(mockDraftRepo)
+	uc := usecase.NewValidateDraft(draftRepo)
+
+	d := sampleDraft("d-1", "owner-id")
+	draftRepo.On("FindByID", mock.Anything, "d-1").Return(d, nil)
+
+	_, err := uc.Execute(context.Background(), "d-1", "intruder")
+	require.Error(t, err)
+	var ae *apierr.APIError
+	assert.ErrorAs(t, err, &ae)
+	assert.Equal(t, 403, ae.Status)
+}

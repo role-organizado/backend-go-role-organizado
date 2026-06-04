@@ -204,6 +204,48 @@ func (uc *DeleteDraft) Execute(ctx context.Context, id, requesterID string) erro
 	return uc.drafts.DeleteByID(ctx, id)
 }
 
+// ---- ValidateDraft ----
+
+// ValidateDraft implements portin.ValidateDraftUseCase.
+type ValidateDraft struct {
+	drafts portout.EventoDraftRepository
+}
+
+// NewValidateDraft creates a new ValidateDraft use case.
+func NewValidateDraft(d portout.EventoDraftRepository) *ValidateDraft {
+	return &ValidateDraft{drafts: d}
+}
+
+// Execute validates whether a draft is complete enough to be published.
+// Always returns the full list of DraftValidationResult (one per required field).
+// Returns a non-nil error only for system-level failures (not found, forbidden).
+func (uc *ValidateDraft) Execute(ctx context.Context, draftID, requesterID string) ([]portin.DraftValidationResult, error) {
+	d, err := uc.drafts.FindByID(ctx, draftID)
+	if err != nil {
+		return nil, err
+	}
+	if !d.IsOwner(requesterID) {
+		return nil, apierr.Forbidden("acesso negado")
+	}
+
+	results := []portin.DraftValidationResult{
+		validateCampo("nome", d.Nome != "", "Título do evento é obrigatório"),
+		validateCampo("tipo", d.Tipo != "", "Tipo do evento é obrigatório"),
+		validateCampo("data", d.Data != nil, "Data do evento é obrigatória"),
+		validateCampo("local", d.Local != "", "Local do evento é obrigatório"),
+	}
+
+	return results, nil
+}
+
+// validateCampo builds a DraftValidationResult for a single required field.
+func validateCampo(campo string, valid bool, msgErro string) portin.DraftValidationResult {
+	if valid {
+		return portin.DraftValidationResult{Campo: campo, Valido: true}
+	}
+	return portin.DraftValidationResult{Campo: campo, Valido: false, Mensagem: msgErro}
+}
+
 // ---- PublishDraft ----
 
 // PublishDraft implements portin.PublishDraftUseCase.

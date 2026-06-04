@@ -167,3 +167,17 @@ type DeleteDraftUseCase interface {
 type PublishDraftUseCase interface {
 	Execute(ctx context.Context, draftID, requesterID string) (*event.Evento, error)
 }
+
+// DraftValidationResult represents the outcome of validating one required field of a draft.
+type DraftValidationResult struct {
+	Campo    string `json:"campo"`
+	Valido   bool   `json:"valido"`
+	Mensagem string `json:"mensagem,omitempty"`
+}
+
+// ValidateDraftUseCase checks whether a draft has all required fields to be published.
+// It always returns the full list of DraftValidationResult.
+// A non-nil error is returned only for system-level failures (not found, forbidden, etc.).
+type ValidateDraftUseCase interface {
+	Execute(ctx context.Context, draftID, requesterID string) ([]DraftValidationResult, error)
+}
