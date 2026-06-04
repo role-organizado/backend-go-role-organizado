@@ -140,6 +140,13 @@ func UserIDFromContext(ctx context.Context) string {
 	return v
 }
 
+// ContextWithUserID injects a user ID into the context.
+// Intended for use in tests and integration helpers; in production the JWTAuth middleware
+// is the sole writer of this value.
+func ContextWithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, contextKeyUserID, userID)
+}
+
 // ClaimsFromContext extracts the JWT claims from the request context.
 // Returns nil if not authenticated.
 func ClaimsFromContext(ctx context.Context) *pkgjwt.Claims {

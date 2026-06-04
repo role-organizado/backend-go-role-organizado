@@ -64,6 +64,11 @@ func (m *mockEventoRepo) DeleteByID(ctx context.Context, id string) error {
 	return args.Error(0)
 }
 
+func (m *mockEventoRepo) AddConvidados(ctx context.Context, eventoID string, convidados []domain.Convidado) error {
+	args := m.Called(ctx, eventoID, convidados)
+	return args.Error(0)
+}
+
 // ---- helpers ----
 
 func sampleEvento(id, userID string) *domain.Evento {

@@ -191,6 +191,32 @@ func (uc *DeleteEvento) Execute(ctx context.Context, id, requesterID string) err
 	return uc.eventos.DeleteByID(ctx, id)
 }
 
+// ---- AddConvidados ----
+
+// AddConvidados implements portin.AddConvidadosUseCase.
+type AddConvidados struct {
+	eventos portout.EventoRepository
+}
+
+// NewAddConvidados creates a new AddConvidados use case.
+func NewAddConvidados(e portout.EventoRepository) *AddConvidados {
+	return &AddConvidados{eventos: e}
+}
+
+// Execute adds convidados to a published event, verifying the event exists.
+func (uc *AddConvidados) Execute(ctx context.Context, in portin.AddConvidadosInput) error {
+	ctx, span := tracing.StartSpan(ctx, "usecase.event.addConvidados",
+		tracing.EventID(in.EventoID),
+		tracing.UserID(in.UsuarioID),
+	)
+	defer span.End()
+
+	if len(in.Convidados) == 0 {
+		return nil
+	}
+	return uc.eventos.AddConvidados(ctx, in.EventoID, in.Convidados)
+}
+
 // ---- ListEventosByUsuario ----
 
 // ListEventosByUsuario implements portin.ListEventosByUsuarioUseCase.
