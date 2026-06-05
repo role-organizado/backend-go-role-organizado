@@ -68,7 +68,7 @@ func (r *EventoRepository) FindByID(ctx context.Context, id string) (*domain.Eve
 
 // FindByUsuarioID paginates events belonging to the given user.
 func (r *EventoRepository) FindByUsuarioID(ctx context.Context, usuarioID string, page, pageSize int) ([]domain.Evento, int64, error) {
-	filter := bson.D{{Key: "usuario_id_responsavel", Value: uuidStringToBinary(usuarioID)}}
+	filter := bson.D{{Key: "usuario_id_responsavel", Value: userIDValue(usuarioID)}}
 	return r.findPaginated(ctx, filter, page, pageSize)
 }
 
@@ -91,7 +91,7 @@ func (r *EventoRepository) FindByUsuarioIDCursor(ctx context.Context, usuarioID 
 	}
 
 	// Build filter
-	filter := bson.D{{Key: "usuario_id_responsavel", Value: uuidStringToBinary(usuarioID)}}
+	filter := bson.D{{Key: "usuario_id_responsavel", Value: userIDValue(usuarioID)}}
 	if filtros.Status != nil {
 		filter = append(filter, bson.E{Key: "status", Value: *filtros.Status})
 	}
@@ -200,7 +200,7 @@ func (r *EventoRepository) Save(ctx context.Context, e *domain.Evento) (*domain.
 		Nome:                 e.Nome,
 		Tipo:                 e.Tipo,
 		DataInicio:           e.Data,
-		UsuarioIDResponsavel: uuidStringToBinary(e.UsuarioID),
+		UsuarioIDResponsavel: userIDValue(e.UsuarioID),
 		Descricao:            e.Descricao,
 		Local:                e.Local,
 		Status:               status,

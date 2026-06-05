@@ -153,9 +153,10 @@ func main() {
 	// --- Phase 3: Events & Drafts domain repositories ---
 	eventoRepo := mongodb.NewEventoRepository(mongoClient)
 	draftRepo := mongodb.NewEventoDraftRepository(mongoClient)
+	participanteRepo := mongodb.NewParticipanteRepository(mongoClient)
 
 	// --- Phase 3: Events domain use cases ---
-	createEventoUC := ucevent.NewCreateEvento(eventoRepo)
+	createEventoUC := ucevent.NewCreateEvento(eventoRepo, participanteRepo)
 	getEventoUC := ucevent.NewGetEvento(eventoRepo)
 	listEventosUC := ucevent.NewListEventos(eventoRepo)
 	updateEventoUC := ucevent.NewUpdateEvento(eventoRepo)
