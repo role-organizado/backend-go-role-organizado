@@ -24,6 +24,7 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
 	"github.com/role-organizado/backend-go-role-organizado/migrations"
 	pkgjwt "github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
+	pkgotel "github.com/role-organizado/backend-go-role-organizado/pkg/otel"
 
 	// Phase 1
 	ucconfig "github.com/role-organizado/backend-go-role-organizado/internal/usecase/config"
@@ -68,7 +69,32 @@ func main() {
 	if cfg.Server.Env == "local" {
 		logLevel = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
+
+	var logHandler slog.Handler = jsonHandler
+
+	if cfg.OTel.Enabled {
+		providers, err := pkgotel.Init(ctx, pkgotel.Config{
+			OTLPEndpoint:   cfg.OTel.Endpoint,
+			ServiceName:    cfg.OTel.ServiceName,
+			ServiceVersion: cfg.OTel.ServiceVersion,
+			Environment:    cfg.Server.Env,
+		})
+		if err != nil {
+			slog.Error("initializing otel", "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := providers.Shutdown(shutdownCtx); err != nil {
+				slog.Error("otel shutdown", "error", err)
+			}
+		}()
+		logHandler = pkgotel.NewTeeHandler(providers.LoggerProvider, jsonHandler)
+	}
+
+	logger := slog.New(logHandler)
 	slog.SetDefault(logger)
 
 	slog.Info("starting backend-go-role-organizado",

@@ -61,18 +61,23 @@ func (h *UsuarioHandler) RegisterRoutes(r chi.Router) {
 // ---- DTOs ----
 
 type usuarioDetailResponse struct {
-	ID             string     `json:"id"`
-	Nome           string     `json:"nome"`
-	Email          string     `json:"email"`
-	FotoPerfil     string     `json:"fotoPerfil,omitempty"`
-	Roles          []string   `json:"roles"`
-	Ativo          bool       `json:"ativo"`
-	CriadoEm      time.Time  `json:"criadoEm"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	ID         string              `json:"id"`
+	Nome       string              `json:"nome"`
+	Email      string              `json:"email"`
+	CPF        string              `json:"cpf,omitempty"`
+	FotoPerfil string              `json:"fotoPerfil,omitempty"`
+	Telefone   *telefoneReq        `json:"telefone,omitempty"`
+	Endereco   *enderecoReq        `json:"endereco,omitempty"`
+	Roles      []string            `json:"roles"`
+	Ativo      bool                `json:"ativo"`
+	CriadoEm  time.Time           `json:"criadoEm"`
+	UpdatedAt  time.Time           `json:"updatedAt"`
 }
 
 type updateUsuarioRequest struct {
 	Nome       string       `json:"nome"`
+	Email      string       `json:"email"`
+	CPF        string       `json:"cpf"`
 	FotoPerfil string       `json:"fotoPerfil"`
 	Telefone   *telefoneReq `json:"telefone"`
 	Endereco   *enderecoReq `json:"endereco"`
@@ -135,7 +140,7 @@ func (h *UsuarioHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
 		return
 	}
-	in := portin.UpdateUsuarioInput{Nome: req.Nome, FotoPerfil: req.FotoPerfil}
+	in := portin.UpdateUsuarioInput{Nome: req.Nome, Email: req.Email, CPF: req.CPF, FotoPerfil: req.FotoPerfil}
 	if req.Telefone != nil {
 		in.Telefone = &auth.Telefone{DDI: req.Telefone.DDI, DDD: req.Telefone.DDD, Numero: req.Telefone.Numero, Tipo: req.Telefone.Tipo}
 	}
@@ -173,7 +178,7 @@ func (h *UsuarioHandler) UpdateByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
 		return
 	}
-	in := portin.UpdateUsuarioInput{Nome: req.Nome, FotoPerfil: req.FotoPerfil}
+	in := portin.UpdateUsuarioInput{Nome: req.Nome, Email: req.Email, CPF: req.CPF, FotoPerfil: req.FotoPerfil}
 	if req.Telefone != nil {
 		in.Telefone = &auth.Telefone{DDI: req.Telefone.DDI, DDD: req.Telefone.DDD, Numero: req.Telefone.Numero, Tipo: req.Telefone.Tipo}
 	}
@@ -297,14 +302,25 @@ func toUsuarioDetailResponse(u auth.Usuario) usuarioDetailResponse {
 	for i, r := range u.Roles {
 		roles[i] = string(r)
 	}
-	return usuarioDetailResponse{
+	resp := usuarioDetailResponse{
 		ID:        u.ID,
 		Nome:      u.Nome,
 		Email:     u.Email,
+		CPF:       u.CPF,
 		FotoPerfil: u.FotoPerfil,
 		Roles:     roles,
 		Ativo:     u.Ativo,
 		CriadoEm: u.CriadoEm,
 		UpdatedAt: u.UpdatedAt,
 	}
+	if u.Telefone != nil {
+		resp.Telefone = &telefoneReq{DDI: u.Telefone.DDI, DDD: u.Telefone.DDD, Numero: u.Telefone.Numero, Tipo: u.Telefone.Tipo}
+	}
+	if u.Endereco != nil {
+		resp.Endereco = &enderecoReq{
+			Rua: u.Endereco.Rua, Numero: u.Endereco.Numero, Complemento: u.Endereco.Complemento,
+			Bairro: u.Endereco.Bairro, Cidade: u.Endereco.Cidade, Estado: u.Endereco.Estado, CEP: u.Endereco.CEP,
+		}
+	}
+	return resp
 }
