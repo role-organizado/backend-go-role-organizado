@@ -99,6 +99,13 @@ type authResponse struct {
 	Usuario      usuarioResponse `json:"usuario"`
 }
 
+// validateResponse is the response for GET /api/auth/validate.
+// The BFF and mobile apps check body.valid === true to confirm the token is still valid.
+type validateResponse struct {
+	Valid    bool            `json:"valid"`
+	Usuario  usuarioResponse `json:"usuario"`
+}
+
 // ---- handlers ----
 
 // Login godoc
@@ -175,7 +182,8 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} authResponse
 // @Router /api/auth/validate [get]
 func (h *AuthHandler) Validate(w http.ResponseWriter, r *http.Request) {
-	// JWT is already validated by middleware — extract token from header
+	// Extract token from Authorization header and validate it via the use case.
+	// The BFF and app check body.valid === true to confirm the token is still active.
 	authHeader := r.Header.Get("Authorization")
 	token := ""
 	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
@@ -186,7 +194,10 @@ func (h *AuthHandler) Validate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toAuthResponse(out))
+	writeJSON(w, http.StatusOK, validateResponse{
+		Valid:   true,
+		Usuario: toUsuarioResponse(*out.Usuario),
+	})
 }
 
 // Logout godoc

@@ -48,6 +48,7 @@ func (h *UsuarioHandler) RegisterRoutes(r chi.Router) {
 	// Legacy path aliases — same API surface as Java backend for BFF compatibility
 	r.Get("/api/usuarios/{id}", h.GetByID)
 	r.Put("/api/usuarios/{id}", h.UpdateByID)
+	r.Patch("/api/usuarios/{id}", h.UpdateByID) // app uses PATCH for partial profile updates
 }
 
 // ---- DTOs ----
