@@ -303,7 +303,7 @@ func TestUsuarioHandler_PATCH_RouteRegistered(t *testing.T) {
 	}
 	updateUC.On("Execute", mock.Anything, "u1", mock.Anything).Return(updated, nil)
 
-	h := handler.NewUsuarioHandler(getUC, updateUC, listUC, roleUC)
+	h := handler.NewUsuarioHandler(getUC, updateUC, listUC, roleUC, nil)
 	r := chi.NewRouter()
 	h.RegisterRoutes(r)
 
@@ -335,7 +335,7 @@ func TestUsuarioHandler_PUT_StillWorks(t *testing.T) {
 	}
 	updateUC.On("Execute", mock.Anything, "u2", mock.Anything).Return(updated, nil)
 
-	h := handler.NewUsuarioHandler(getUC, updateUC, listUC, roleUC)
+	h := handler.NewUsuarioHandler(getUC, updateUC, listUC, roleUC, nil)
 	r := chi.NewRouter()
 	h.RegisterRoutes(r)
 

@@ -66,6 +66,7 @@ func newUsuarioRouter() (*chi.Mux, *stubUpdateUsuario) {
 		updateStub,
 		&stubListUsuarios{},
 		&stubUpdateRole{},
+		nil,
 	)
 	r := chi.NewRouter()
 	h.RegisterRoutes(r)

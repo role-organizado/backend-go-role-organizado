@@ -300,8 +300,8 @@ func TestValidateDraft_AllFieldsValid(t *testing.T) {
 	require.Len(t, results, 4)
 
 	for _, res := range results {
-		assert.True(t, res.Valido, "campo %q deveria ser válido", res.Campo)
-		assert.Empty(t, res.Mensagem)
+		assert.True(t, res.Valid, "campo %q deveria ser válido", res.Field)
+		assert.Empty(t, res.Message)
 	}
 }
 
@@ -322,9 +322,9 @@ func TestValidateDraft_MissingRequiredFields(t *testing.T) {
 
 	invalidCampos := map[string]bool{}
 	for _, res := range results {
-		if !res.Valido {
-			invalidCampos[res.Campo] = true
-			assert.NotEmpty(t, res.Mensagem, "campo %q inválido deveria ter mensagem", res.Campo)
+		if !res.Valid {
+			invalidCampos[res.Field] = true
+			assert.NotEmpty(t, res.Message, "campo %q inválido deveria ter mensagem", res.Field)
 		}
 	}
 
@@ -354,15 +354,15 @@ func TestValidateDraft_PartiallyValid(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 4)
 
-	byField := map[string]portin.DraftValidationResult{}
+	byField := map[string]portin.ValidationResult{}
 	for _, r := range results {
-		byField[r.Campo] = r
+		byField[r.Field] = r
 	}
 
-	assert.True(t, byField["nome"].Valido)
-	assert.True(t, byField["tipo"].Valido)
-	assert.False(t, byField["data"].Valido)
-	assert.False(t, byField["local"].Valido)
+	assert.True(t, byField["nome"].Valid)
+	assert.True(t, byField["tipo"].Valid)
+	assert.False(t, byField["data"].Valid)
+	assert.False(t, byField["local"].Valid)
 }
 
 func TestValidateDraft_Forbidden(t *testing.T) {
