@@ -180,3 +180,15 @@ type ValidationResult struct {
 type ValidateDraftUseCase interface {
 	Execute(ctx context.Context, id, requesterID string) ([]ValidationResult, error)
 }
+
+// AddConvidadosInput holds the parameters for adding guests to a published event.
+type AddConvidadosInput struct {
+	EventoID   string
+	UsuarioID  string
+	Convidados []event.Convidado
+}
+
+// AddConvidadosUseCase adds convidados (guests) to a published event.
+type AddConvidadosUseCase interface {
+	Execute(ctx context.Context, in AddConvidadosInput) error
+}

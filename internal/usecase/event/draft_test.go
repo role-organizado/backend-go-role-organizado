@@ -93,6 +93,10 @@ func (m *mockEventoRepoForPublish) DeleteByID(ctx context.Context, id string) er
 	return nil
 }
 
+func (m *mockEventoRepoForPublish) AddConvidados(ctx context.Context, eventoID string, convidados []domain.Convidado) error {
+	return nil
+}
+
 // ---- helpers ----
 
 func sampleDraft(id, userID string) *domain.EventoDraft {

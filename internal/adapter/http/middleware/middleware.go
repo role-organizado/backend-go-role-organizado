@@ -146,6 +146,11 @@ func WithUserIDContext(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, contextKeyUserID, userID)
 }
 
+// ContextWithUserID is an alias for WithUserIDContext for backwards compatibility.
+func ContextWithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, contextKeyUserID, userID)
+}
+
 // ClaimsFromContext extracts the JWT claims from the request context.
 // Returns nil if not authenticated.
 func ClaimsFromContext(ctx context.Context) *pkgjwt.Claims {
