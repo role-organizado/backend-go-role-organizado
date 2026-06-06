@@ -113,3 +113,34 @@ func (uc *ConfirmarContribuicao) Execute(ctx context.Context, in portin.Confirma
 	}
 	return uc.repo.UpdateStatus(ctx, in.ContribuicaoID, domain.StatusConfirmado, in.WebhookPaymentID)
 }
+
+// ---- RemoverContribuicao ----
+
+// RemoverContribuicao implements portin.RemoverContribuicaoUseCase.
+// Only PENDENTE contributions can be removed. CONFIRMADO contributions require
+// a refund flow via the payment provider (Asaas) and cannot be deleted directly.
+type RemoverContribuicao struct {
+	repo portout.CofrinhoRepository
+}
+
+// NewRemoverContribuicao creates a new RemoverContribuicao use case.
+func NewRemoverContribuicao(repo portout.CofrinhoRepository) *RemoverContribuicao {
+	return &RemoverContribuicao{repo: repo}
+}
+
+// Execute removes a cofrinho contribution by ID, but only if its status is PENDENTE.
+func (uc *RemoverContribuicao) Execute(ctx context.Context, id string) error {
+	if id == "" {
+		return apierr.BadRequest("id da contribuição é obrigatório")
+	}
+	c, err := uc.repo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if c.Status != domain.StatusPendente {
+		return apierr.Unprocessable(
+			fmt.Sprintf("apenas contribuições com status PENDENTE podem ser removidas. Status atual: %s", c.Status),
+		)
+	}
+	return uc.repo.DeleteByID(ctx, id)
+}

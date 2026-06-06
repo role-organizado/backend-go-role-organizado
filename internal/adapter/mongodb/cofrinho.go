@@ -115,6 +115,19 @@ func (r *CofrinhoRepository) UpdateStatus(ctx context.Context, id string, status
 	return &c, nil
 }
 
+// DeleteByID permanently removes a contribution by its ID.
+// Returns NotFound if no document matched.
+func (r *CofrinhoRepository) DeleteByID(ctx context.Context, id string) error {
+	result, err := r.col.DeleteOne(ctx, bson.D{{Key: "_id", Value: id}})
+	if err != nil {
+		return apierr.Internal(err.Error())
+	}
+	if result.DeletedCount == 0 {
+		return apierr.NotFound("cofrinho_contribuicao", id)
+	}
+	return nil
+}
+
 func cofrinhoToDoc(c *domain.CofrinhoContribuicao) cofrinhoDocument {
 	return cofrinhoDocument{
 		ID:               c.ID,
