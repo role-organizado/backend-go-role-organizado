@@ -73,6 +73,8 @@ func main() {
 
 	var logHandler slog.Handler = jsonHandler
 
+	ctx := context.Background()
+
 	if cfg.OTel.Enabled {
 		providers, err := pkgotel.Init(ctx, pkgotel.Config{
 			OTLPEndpoint:   cfg.OTel.Endpoint,
@@ -103,7 +105,6 @@ func main() {
 	)
 
 	// Connect to MongoDB.
-	ctx := context.Background()
 	mongoClient, err := mongodb.Connect(ctx, cfg.MongoDB.URI, cfg.MongoDB.Database)
 	if err != nil {
 		slog.Error("connecting to mongodb", "error", err)

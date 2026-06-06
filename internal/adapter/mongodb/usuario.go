@@ -194,11 +194,15 @@ func (r *UsuarioRepository) FindByProviderID(ctx context.Context, provider, prov
 	return &u, nil
 }
 
-// Save inserts a new Usuario document with a freshly generated ObjectID.
+// Save inserts a new Usuario document with a freshly generated UUID binary ID,
+// matching Java's schema so that cross-collection validators (e.g. refresh_tokens.usuario_id)
+// accept the value without type errors.
 func (r *UsuarioRepository) Save(ctx context.Context, u *auth.Usuario) (*auth.Usuario, error) {
 	now := time.Now().UTC()
 	doc := usuarioToDoc(u)
-	doc.ID = bson.NewObjectID()
+	newUUID := uuid.New()
+	idBytes := [16]byte(newUUID)
+	doc.ID = bson.Binary{Subtype: 0x04, Data: idBytes[:]}
 	doc.CriadoEm = now
 	doc.UpdatedAt = now
 

@@ -196,7 +196,7 @@ func (uc *PreviewRateio) Execute(ctx context.Context, id, requesterID string, pa
 		n = r.NumeroParticipantes
 	}
 	if n == 0 {
-		return nil, apierr.BadRequest("número de participantes não definido")
+		return nil, apierr.Unprocessable("número de participantes não definido")
 	}
 
 	total := r.ValorTotal
