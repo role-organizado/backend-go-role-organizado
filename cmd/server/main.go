@@ -38,6 +38,8 @@ import (
 	ucpayment "github.com/role-organizado/backend-go-role-organizado/internal/usecase/payment"
 	// Phase 6
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
+	// Phase 6b: Notification Templates
+	ucnotiftemplate "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notificationtemplate"
 	// Phase 7
 	ucstorage "github.com/role-organizado/backend-go-role-organizado/internal/usecase/storage"
 	// Cofrinho
@@ -247,6 +249,23 @@ func main() {
 	)
 
 	// --- Phase 6: Notifications domain ---
+	notifTemplateRepo := mongodb.NewNotificationTemplateRepository(mongoClient)
+
+	createTemplateUC := ucnotiftemplate.NewCreateNotificationTemplate(notifTemplateRepo)
+	getTemplateUC := ucnotiftemplate.NewGetNotificationTemplate(notifTemplateRepo)
+	listTemplatesUC := ucnotiftemplate.NewListNotificationTemplates(notifTemplateRepo)
+	updateTemplateUC := ucnotiftemplate.NewUpdateNotificationTemplate(notifTemplateRepo)
+	deleteTemplateUC := ucnotiftemplate.NewDeleteNotificationTemplate(notifTemplateRepo)
+	renderTemplateUC := ucnotiftemplate.NewRenderNotificationTemplate(notifTemplateRepo)
+	testSendTemplateUC := ucnotiftemplate.NewTestSendNotificationTemplate(notifTemplateRepo)
+	getByTypeTemplateUC := ucnotiftemplate.NewGetByTypeNotificationTemplate(notifTemplateRepo)
+	listCategoriaTemplateUC := ucnotiftemplate.NewListByCategoriaNotificationTemplate(notifTemplateRepo)
+
+	notifTemplateHandler := handler.NewNotificationTemplateHandler(
+		createTemplateUC, getTemplateUC, listTemplatesUC, updateTemplateUC, deleteTemplateUC,
+		renderTemplateUC, testSendTemplateUC, getByTypeTemplateUC, listCategoriaTemplateUC,
+	)
+
 	notificacaoRepo := mongodb.NewNotificacaoRepository(mongoClient)
 
 	listNotifUC := ucnotification.NewListNotificacoes(notificacaoRepo)
@@ -329,6 +348,7 @@ func main() {
 		rateioHandler.RegisterRateioRoutes(r)
 		paymentHandler.RegisterPaymentRoutes(r)
 		notificationHandler.RegisterNotificationRoutes(r)
+		notifTemplateHandler.RegisterNotificationTemplateRoutes(r)
 		storageHandler.RegisterStorageRoutes(r)
 		workflowProxyHandler.RegisterWorkflowRoutes(r)
 		cofrinhoHandler.RegisterCofrinhoRoutes(r)
