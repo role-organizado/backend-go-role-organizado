@@ -40,3 +40,9 @@ type ListContribuicoesUseCase interface {
 type ConfirmarContribuicaoUseCase interface {
 	Execute(ctx context.Context, in ConfirmarContribuicaoInput) (*cofrinho.CofrinhoContribuicao, error)
 }
+
+// RemoverContribuicaoUseCase removes a PENDENTE contribution by ID.
+// Only contributions in PENDENTE status can be removed; CONFIRMADO ones require a refund flow.
+type RemoverContribuicaoUseCase interface {
+	Execute(ctx context.Context, id string) error
+}

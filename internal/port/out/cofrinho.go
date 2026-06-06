@@ -12,4 +12,6 @@ type CofrinhoRepository interface {
 	FindByID(ctx context.Context, id string) (*cofrinho.CofrinhoContribuicao, error)
 	FindByEventoID(ctx context.Context, eventoID string) ([]*cofrinho.CofrinhoContribuicao, error)
 	UpdateStatus(ctx context.Context, id string, status cofrinho.CofrinhoStatus, webhookPaymentID string) (*cofrinho.CofrinhoContribuicao, error)
+	// DeleteByID permanently removes a contribution by ID.
+	DeleteByID(ctx context.Context, id string) error
 }

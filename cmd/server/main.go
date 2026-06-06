@@ -274,7 +274,8 @@ func main() {
 	createContribuicaoUC := uccofrinho.NewCreateContribuicao(cofrinhoRepo)
 	listContribuicoesUC := uccofrinho.NewListContribuicoes(cofrinhoRepo)
 	confirmarContribuicaoUC := uccofrinho.NewConfirmarContribuicao(cofrinhoRepo)
-	cofrinhoHandler := handler.NewCofrinhoHandler(createContribuicaoUC, listContribuicoesUC, confirmarContribuicaoUC)
+	removerContribuicaoUC := uccofrinho.NewRemoverContribuicao(cofrinhoRepo)
+	cofrinhoHandler := handler.NewCofrinhoHandler(createContribuicaoUC, listContribuicoesUC, confirmarContribuicaoUC, removerContribuicaoUC)
 
 	// --- Lista Presentes domain ---
 	listaPresentesRepo := mongodb.NewListaPresentesRepository(mongoClient)
