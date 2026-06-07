@@ -92,9 +92,6 @@ func (h *FinanceHandler) RegisterFinanceRoutes(r chi.Router) {
 	r.Delete("/api/v1/saved-cards/{cardId}", h.DeleteSavedCard)
 	r.Post("/api/v1/saved-cards/{cardId}/set-default", h.SetDefaultSavedCard)
 
-	// Installments query
-	r.Get("/api/v1/installments", h.QueryInstallments)
-	r.Get("/api/v1/installments/user", h.GetUserInstallments)
 }
 
 // ---- finance_summaries ----
@@ -532,71 +529,6 @@ func (h *FinanceHandler) SetDefaultSavedCard(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
-}
-
-// ---- installments ----
-
-func (h *FinanceHandler) QueryInstallments(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	filter := bson.M{}
-	if eventID := q.Get("eventId"); eventID != "" {
-		filter["event_id"] = eventID
-	}
-	if userID := q.Get("userId"); userID != "" {
-		filter["user_id"] = userID
-	}
-	if status := q.Get("status"); status != "" {
-		filter["status"] = status
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
-	col := h.mongo.Collection("payment_installments")
-	cursor, err := col.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "due_date", Value: 1}}))
-	if err != nil {
-		writeJSON(w, http.StatusOK, []bson.M{})
-		return
-	}
-	defer cursor.Close(ctx)
-
-	var results []bson.M
-	if err := cursor.All(ctx, &results); err != nil || results == nil {
-		results = []bson.M{}
-	}
-	writeJSON(w, http.StatusOK, results)
-}
-
-// GetUserInstallments handles GET /api/v1/installments/user
-// Returns all installments for the authenticated user, optionally filtered by status.
-func (h *FinanceHandler) GetUserInstallments(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.UserIDFromContext(r.Context())
-	if userID == "" {
-		writeError(w, apierr.Unauthorized("usuário não autenticado"))
-		return
-	}
-
-	filter := bson.M{"user_id": userID}
-	if status := r.URL.Query().Get("status"); status != "" {
-		filter["status"] = status
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
-	col := h.mongo.Collection("payment_installments")
-	cursor, err := col.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "due_date", Value: 1}}))
-	if err != nil {
-		writeJSON(w, http.StatusOK, []bson.M{})
-		return
-	}
-	defer cursor.Close(ctx)
-
-	var results []bson.M
-	if err := cursor.All(ctx, &results); err != nil || results == nil {
-		results = []bson.M{}
-	}
-	writeJSON(w, http.StatusOK, results)
 }
 
 // ---- helpers ----

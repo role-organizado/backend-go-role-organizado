@@ -31,6 +31,7 @@ type ProcessPaymentInput struct {
 	ClientIP       string
 	CreditCard     *CreditCardInput // required when Method == CREDIT_CARD
 	SaveCard       bool
+	SavedCardID    string   // optional: ID of a previously saved credit card (sets CreditCard.TokenRef)
 	InstallmentIDs []string // optional: links transaction to specific installments
 }
 
@@ -110,6 +111,14 @@ type HandlePaymentCallbackUseCase interface {
 }
 
 // ─── Installments ───────────────────────────────────────────────────────────
+
+// ListUserInstallmentsUseCase lists installments for the authenticated user,
+// searching by both userId and participationIds (BUG5/spec-096 fix), and
+// filtering out installments from events still in a planning phase
+// (ORGANIZACAO / AGUARDANDO_ACEITE).
+type ListUserInstallmentsUseCase interface {
+	Execute(ctx context.Context, userID string, statusFilter *domain.InstallmentStatus) ([]*domain.PaymentInstallment, error)
+}
 
 // CancelParticipantInstallmentsInput identifies the participant whose open
 // installments should be cancelled.

@@ -237,6 +237,7 @@ func main() {
 	// --- Phase 5: Payments domain ---
 	pagamentoRepo := mongodb.NewPagamentoRepository(mongoClient)
 	configPagRepo := mongodb.NewConfigPagamentoRepository(mongoClient)
+	installmentRepo := mongodb.NewPaymentInstallmentRepository(mongoClient)
 
 	createPayUC := ucpayment.NewCreatePagamento(pagamentoRepo)
 	getPayUC := ucpayment.NewGetPagamento(pagamentoRepo)
@@ -247,9 +248,17 @@ func main() {
 	upsertCfgPayUC := ucpayment.NewUpsertConfigPagamento(configPagRepo)
 	getCfgPayUC := ucpayment.NewGetConfigPagamento(configPagRepo)
 
+	listUserInstallmentsUC := ucpayment.NewListUserInstallments(installmentRepo, participanteRepo, eventoRepo)
+	listInstallmentsUC := ucpayment.NewListInstallments(installmentRepo, participanteRepo)
+	getInstallmentUC := ucpayment.NewGetInstallment(installmentRepo, participanteRepo)
+	cancelInstallmentsUC := ucpayment.NewCancelParticipantInstallments(installmentRepo, participanteRepo, eventoRepo)
+
 	paymentHandler := handler.NewPaymentHandler(
 		createPayUC, getPayUC, listPayUC, updatePayUC, deletePayUC,
 		confirmarPayUC, upsertCfgPayUC, getCfgPayUC,
+	)
+	installmentHandler := handler.NewInstallmentHandler(
+		listUserInstallmentsUC, listInstallmentsUC, getInstallmentUC, cancelInstallmentsUC,
 	)
 
 	// --- Phase 6: Notifications domain ---
@@ -358,6 +367,7 @@ func main() {
 		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 		listaPresentesHandler.RegisterListaPresentesRoutes(r)
 		financeHandler.RegisterFinanceRoutes(r)
+		installmentHandler.RegisterInstallmentRoutes(r)
 		adminHandler.RegisterAdminRoutes(r)
 		participantesHandler.RegisterParticipantesRoutes(r)
 		usuariosEventoHandler.RegisterUsuariosEventoRoutes(r)

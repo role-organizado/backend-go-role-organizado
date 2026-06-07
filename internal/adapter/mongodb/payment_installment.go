@@ -127,6 +127,20 @@ func (r *PaymentInstallmentRepository) MarkPaidBatch(ctx context.Context, ids []
 	return nil
 }
 
+// FindByEvent returns all installments for an event with an optional status filter,
+// ordered by due_date ascending. Used by ListInstallments when no userId is provided.
+func (r *PaymentInstallmentRepository) FindByEvent(ctx context.Context, eventID string, statusFilter *domain.InstallmentStatus) ([]*domain.PaymentInstallment, error) {
+	filter := bson.D{{Key: "event_id", Value: eventID}}
+	if statusFilter != nil {
+		filter = append(filter, bson.E{Key: "status", Value: string(*statusFilter)})
+	}
+	cursor, err := r.col.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "due_date", Value: 1}}))
+	if err != nil {
+		return nil, apierr.Internal(fmt.Sprintf("find installments by event: %s", err.Error()))
+	}
+	return installmentCursorToSlice(ctx, cursor)
+}
+
 // CancelByParticipant cancels all PENDING and OVERDUE installments for a participant
 // within an event. Returns the number of records updated.
 func (r *PaymentInstallmentRepository) CancelByParticipant(ctx context.Context, eventID, participantID string) (int64, error) {

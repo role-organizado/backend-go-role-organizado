@@ -59,6 +59,10 @@ type PaymentInstallmentRepository interface {
 	// MarkPaidBatch atomically marks a set of installments as PAID, associating
 	// them with the given transaction ID and recording the payment details.
 	MarkPaidBatch(ctx context.Context, ids []string, txID string, paidAt time.Time, method, reference string) error
+	// FindByEvent returns all installments for an event with an optional status
+	// filter, ordered by due_date ascending. Used by ListInstallments when no
+	// specific userId filter is applied.
+	FindByEvent(ctx context.Context, eventID string, statusFilter *domain.InstallmentStatus) ([]*domain.PaymentInstallment, error)
 	// CancelByParticipant cancels all non-terminal installments for a participant
 	// within an event. Returns the number of records updated.
 	CancelByParticipant(ctx context.Context, eventID, participantID string) (int64, error)
