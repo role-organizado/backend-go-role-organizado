@@ -1,3 +1,4 @@
+// Package worker provides Temporal worker registration and lifecycle management.
 package worker
 
 import (
@@ -5,52 +6,54 @@ import (
 
 	"go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"
-
-	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
-	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
 )
 
-// Registry manages Temporal workers for this service.
-// Each worker polls a task queue and executes registered workflows and activities.
+// Registry manages a collection of Temporal workers, providing a unified Start/Stop
+// lifecycle. Equivalent to the Java TemporalWorkerRegistry pattern.
 type Registry struct {
 	client  client.Client
 	workers []sdkworker.Worker
 }
 
-// NewRegistry constructs a Registry backed by the given Temporal client.
+// NewRegistry creates a new worker registry backed by the provided Temporal client.
 func NewRegistry(c client.Client) *Registry {
 	return &Registry{client: c}
 }
 
-// newWorker creates a new worker for the given task queue and appends it to the registry.
-func (r *Registry) newWorker(taskQueue string, opts sdkworker.Options) sdkworker.Worker {
+// NewWorker creates a new Temporal worker for the given task queue and appends it
+// to the registry. The worker is NOT started until Start() is called.
+func (r *Registry) NewWorker(taskQueue string, opts sdkworker.Options) sdkworker.Worker {
 	w := sdkworker.New(r.client, taskQueue, opts)
 	r.workers = append(r.workers, w)
 	return w
 }
 
-// RegisterSandboxWorker registers the SandboxWorkflow and SandboxActivity on SANDBOX_QUEUE.
-// This is a POC worker used to validate the Temporal Go foundation E2E.
-func (r *Registry) RegisterSandboxWorker(act *activity.SandboxActivity) {
-	w := r.newWorker("SANDBOX_QUEUE", sdkworker.Options{})
-	w.RegisterWorkflow(workflow.SandboxWorkflow)
-	w.RegisterActivity(act)
-}
-
 // Start starts all registered workers. Workers begin polling their task queues.
-// Returns the first error encountered, if any.
+// This MUST be called before the HTTP server starts listening so that Temporal
+// workflows are ready to accept tasks from the moment the process is healthy.
 func (r *Registry) Start() error {
-	for _, w := range r.workers {
+	for i, w := range r.workers {
 		if err := w.Start(); err != nil {
-			return fmt.Errorf("starting temporal worker: %w", err)
+			// Stop already-started workers to avoid dangling goroutines.
+			for j := 0; j < i; j++ {
+				r.workers[j].Stop()
+			}
+			return fmt.Errorf("start worker %d: %w", i, err)
 		}
 	}
 	return nil
 }
 
-// Stop gracefully stops all registered workers.
+// Stop stops all registered workers gracefully, waiting for in-progress activities
+// and workflows to complete.
 func (r *Registry) Stop() {
-	for _, w := range r.workers {
-		w.Stop()
+	// Stop in reverse order for clean shutdown.
+	for i := len(r.workers) - 1; i >= 0; i-- {
+		r.workers[i].Stop()
 	}
+}
+
+// Client returns the underlying Temporal client, useful for schedule management.
+func (r *Registry) Client() client.Client {
+	return r.client
 }

@@ -70,6 +70,10 @@ type TemporalConfig struct {
 	// HostPort is the Temporal frontend address (e.g. "10.11.12.244:7233").
 	HostPort  string
 	Namespace string
+	// WorkerEnabled controls whether the Go Temporal worker starts.
+	// Default false during Strangler Fig migration; flip to true after staging validation.
+	// Set via TEMPORAL_WORKER_ENABLED env var.
+	WorkerEnabled bool
 }
 
 // RedisConfig holds Redis connection settings.
@@ -89,6 +93,13 @@ type SQSConfig struct {
 type AsaasConfig struct {
 	BaseURL string
 	APIKey  string
+	// WebhookToken is the secret used to validate incoming Asaas webhook calls.
+	// Set via ROLE_ASAAS_WEBHOOK_TOKEN.
+	WebhookToken string
+	// UseMock controls whether to use the in-memory MockProvider instead of the real
+	// Asaas HTTP client. Defaults to true so local dev never calls the real API.
+	// Set via ROLE_ASAAS_USE_MOCK.
+	UseMock bool
 }
 
 // loadDotEnv reads a .env file and injects each ROLE_* variable into the process
@@ -158,8 +169,9 @@ func Load() (*AppConfig, error) {
 			Enabled:        v.GetBool("otel.enabled"),
 		},
 		Temporal: TemporalConfig{
-			HostPort:  v.GetString("temporal.host_port"),
-			Namespace: v.GetString("temporal.namespace"),
+			HostPort:      v.GetString("temporal.host_port"),
+			Namespace:     v.GetString("temporal.namespace"),
+			WorkerEnabled: v.GetBool("temporal.worker_enabled"),
 		},
 		Redis: RedisConfig{
 			Addr:     v.GetString("redis.addr"),
@@ -171,8 +183,10 @@ func Load() (*AppConfig, error) {
 			QueueURL: v.GetString("sqs.queue_url"),
 		},
 		Asaas: AsaasConfig{
-			BaseURL: v.GetString("asaas.base_url"),
-			APIKey:  v.GetString("asaas.api_key"),
+			BaseURL:      v.GetString("asaas.base_url"),
+			APIKey:       v.GetString("asaas.api_key"),
+			WebhookToken: v.GetString("asaas.webhook_token"),
+			UseMock:      v.GetBool("asaas.use_mock"),
 		},
 	}
 
@@ -205,6 +219,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("temporal.host_port", "10.11.12.244:7233")
 	v.SetDefault("temporal.namespace", "default")
+	v.SetDefault("temporal.worker_enabled", false)
+	_ = v.BindEnv("temporal.worker_enabled", "TEMPORAL_WORKER_ENABLED")
 
 	v.SetDefault("redis.addr", "localhost:6379")
 	v.SetDefault("redis.db", 0)
@@ -212,6 +228,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("sqs.region", "us-east-1")
 
 	v.SetDefault("asaas.base_url", "https://sandbox.asaas.com/api/v3")
+	// UseMock defaults to true so local dev never calls the real Asaas API.
+	// Override with ROLE_ASAAS_USE_MOCK=false (or PAYMENT_USE_MOCK=false via BindEnv).
+	v.SetDefault("asaas.use_mock", true)
+	// Support the legacy env-var name used in some Java deployments.
+	_ = v.BindEnv("asaas.use_mock", "PAYMENT_USE_MOCK")
 }
 
 func (c *AppConfig) validate() error {
