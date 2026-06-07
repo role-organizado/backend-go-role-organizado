@@ -36,7 +36,9 @@ import (
 	ucrateio "github.com/role-organizado/backend-go-role-organizado/internal/usecase/rateio"
 	// Phase 5
 	ucpayment "github.com/role-organizado/backend-go-role-organizado/internal/usecase/payment"
-	// Phase 6
+	// Phase 6: Finance domain
+	ucfinance "github.com/role-organizado/backend-go-role-organizado/internal/usecase/finance"
+	// Phase 7: Notifications
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
 	// Phase 6b: Notification Templates
 	ucnotiftemplate "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notificationtemplate"
@@ -243,9 +245,16 @@ func main() {
 	upsertCfgPayUC := ucpayment.NewUpsertConfigPagamento(configPagRepo)
 	getCfgPayUC := ucpayment.NewGetConfigPagamento(configPagRepo)
 
+	// Saved-cards and installments (moved from finance handler)
+	savedCardRepo := mongodb.NewSavedCardRepository(mongoClient)
+	installmentQueryRepo := mongodb.NewInstallmentQueryRepository(mongoClient)
+	savedCardsUC := ucpayment.NewManageSavedCards(savedCardRepo)
+	installmentsQueryUC := ucpayment.NewQueryInstallments(installmentQueryRepo)
+
 	paymentHandler := handler.NewPaymentHandler(
 		createPayUC, getPayUC, listPayUC, updatePayUC, deletePayUC,
 		confirmarPayUC, upsertCfgPayUC, getCfgPayUC,
+		savedCardsUC, installmentsQueryUC,
 	)
 
 	// --- Phase 6: Notifications domain ---
@@ -308,8 +317,32 @@ func main() {
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
-	// --- Finance, Admin, Participantes handlers (direct MongoDB) ---
-	financeHandler := handler.NewFinanceHandler(mongoClient)
+	// --- Phase 6: Finance domain (hexagonal — zero direct Mongo in handler) ---
+	participantReadRepo := mongodb.NewParticipantRepository(mongoClient)
+	installmentRepo := mongodb.NewPaymentInstallmentRepository(mongoClient)
+	financeSummaryRepo := mongodb.NewFinanceSummaryRepository(mongoClient)
+	ledgerEntryRepo := mongodb.NewLedgerEntryRepository(mongoClient)
+	paymentAccountRepo := mongodb.NewPaymentAccountRepository(mongoClient)
+	auditTrailRepo := mongodb.NewAuditTrailRepository(mongoClient)
+
+	listEventsUC := ucfinance.NewListFinanceEvents(participantReadRepo, eventoRepo, rateioRepo, financeSummaryRepo)
+	overviewUC := ucfinance.NewGetFinanceOverview(eventoRepo, participantReadRepo, rateioRepo, financeSummaryRepo)
+	ledgerUC := ucfinance.NewGetLedgerStatement(ledgerEntryRepo, participantReadRepo)
+	participantsUC := ucfinance.NewGetParticipantsStatus(participantReadRepo, installmentRepo)
+	recalculateUC := ucfinance.NewRecalculateFinanceSummary(financeSummaryRepo, rateioRepo, installmentRepo)
+	sendRemindersUC := ucfinance.NewSendPaymentReminders(participantReadRepo, installmentRepo, nil) // nil = Temporal not configured
+	holdBalanceUC := ucfinance.NewCalculateHoldBalance(installmentRepo, configSistemaRepo)
+	paymentStatusUC := ucfinance.NewGetEventPaymentStatus(installmentRepo, participantReadRepo)
+	paymentAccountsUC := ucfinance.NewManagePaymentAccounts(paymentAccountRepo)
+	auditTrailUC := ucfinance.NewGetAuditTrail(auditTrailRepo)
+
+	financeHandler := handler.NewFinanceHandler(
+		listEventsUC, overviewUC, ledgerUC, participantsUC, recalculateUC,
+		sendRemindersUC, holdBalanceUC, paymentStatusUC, paymentAccountsUC,
+		auditTrailUC,
+	)
+
+	// --- Misc handlers (direct MongoDB — unchanged) ---
 	adminHandler := handler.NewAdminHandler(mongoClient)
 	participantesHandler := handler.NewParticipantesHandler(mongoClient)
 	usuariosEventoHandler := handler.NewUsuariosEventoHandler(mongoClient)

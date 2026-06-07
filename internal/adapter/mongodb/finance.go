@@ -401,3 +401,71 @@ func (r *PaymentAccountMongoRepository) SoftDelete(ctx context.Context, id, user
 	}
 	return nil
 }
+
+// ===================================================================
+// AuditEntry — collection: audit_trail
+// Represents a single audit event in an event's audit trail.
+// event_id is stored as UUID Binary subtype 4 (Java-compatible).
+// The repository returns empty results gracefully if the collection
+// does not exist in the current environment.
+// ===================================================================
+
+type auditEntryDocument struct {
+	ID          interface{} `bson:"_id,omitempty"`
+	EventID     bson.Binary `bson:"event_id"`
+	Action      string      `bson:"action"`
+	ActorID     string      `bson:"actor_id"`
+	Description string      `bson:"description"`
+	OccurredAt  time.Time   `bson:"occurred_at"`
+}
+
+// AuditTrailMongoRepository implements portout.AuditTrailRepository.
+type AuditTrailMongoRepository struct {
+	col *mongo.Collection
+}
+
+// NewAuditTrailRepository creates an AuditTrailRepository backed by MongoDB.
+func NewAuditTrailRepository(client *Client) portout.AuditTrailRepository {
+	return &AuditTrailMongoRepository{col: client.Collection("audit_trail")}
+}
+
+// FindByEventID returns a paginated list of audit entries for the given event.
+// Returns an empty slice gracefully if the collection does not exist.
+func (r *AuditTrailMongoRepository) FindByEventID(ctx context.Context, eventID string, page, size int) ([]domain.AuditEntry, int64, error) {
+	filter := bson.D{{Key: "event_id", Value: UUIDStringToBinary(eventID)}}
+
+	total, err := r.col.CountDocuments(ctx, filter)
+	if err != nil {
+		// Collection may not exist in dev seed — return empty list.
+		return []domain.AuditEntry{}, 0, nil
+	}
+
+	skip := int64(page * size)
+	opts := options.Find().
+		SetSort(bson.D{{Key: "occurred_at", Value: -1}}).
+		SetSkip(skip).
+		SetLimit(int64(size))
+
+	cur, err := r.col.Find(ctx, filter, opts)
+	if err != nil {
+		return []domain.AuditEntry{}, 0, nil
+	}
+	defer cur.Close(ctx)
+
+	entries := make([]domain.AuditEntry, 0)
+	for cur.Next(ctx) {
+		var doc auditEntryDocument
+		if err := cur.Decode(&doc); err != nil {
+			continue
+		}
+		entries = append(entries, domain.AuditEntry{
+			ID:          rawIDToString(doc.ID),
+			EventID:     uuidBinaryToString(doc.EventID),
+			Action:      doc.Action,
+			ActorID:     doc.ActorID,
+			Description: doc.Description,
+			OccurredAt:  doc.OccurredAt,
+		})
+	}
+	return entries, total, nil
+}

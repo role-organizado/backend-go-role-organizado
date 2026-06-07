@@ -7,6 +7,12 @@ import (
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/finance"
 )
 
+// AuditTrailRepository defines persistence for audit trail entries.
+// Returns an empty list gracefully if the collection does not exist.
+type AuditTrailRepository interface {
+	FindByEventID(ctx context.Context, eventID string, page, size int) ([]domain.AuditEntry, int64, error)
+}
+
 // FinanceSummaryRepository defines persistence operations for event finance summaries.
 type FinanceSummaryRepository interface {
 	FindByEventID(ctx context.Context, eventID string) (*domain.FinanceSummary, error)

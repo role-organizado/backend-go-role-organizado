@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
+	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
 
@@ -286,4 +287,240 @@ func (r *ConfigPagamentoMongoRepository) Update(ctx context.Context, cfg *domain
 		return nil, apierr.Internal(err.Error())
 	}
 	return cfg, nil
+}
+
+// ===================================================================
+// SavedCard — collection: saved_credit_cards
+// Holds a user's saved credit cards for reuse at checkout.
+// user_id is stored as UUID Binary subtype 4 (Java-compatible) or ObjectID.
+// ===================================================================
+
+type savedCardDocument struct {
+	ID          any        `bson:"_id,omitempty"`
+	UserID      any        `bson:"user_id"`
+	LastFour    string     `bson:"last_four,omitempty"`
+	Brand       string     `bson:"brand,omitempty"`
+	HolderName  string     `bson:"holder_name,omitempty"`
+	ExpiryMonth int        `bson:"expiry_month,omitempty"`
+	ExpiryYear  int        `bson:"expiry_year,omitempty"`
+	IsDefault   bool       `bson:"is_default"`
+	Active      bool       `bson:"active"`
+	CreatedAt   time.Time  `bson:"criado_em"`
+	UpdatedAt   time.Time  `bson:"atualizado_em"`
+}
+
+func savedCardDocToDomain(doc savedCardDocument) *domain.SavedCard {
+	return &domain.SavedCard{
+		ID:          rawIDToString(doc.ID),
+		UserID:      rawIDToString(doc.UserID),
+		LastFour:    doc.LastFour,
+		Brand:       doc.Brand,
+		HolderName:  doc.HolderName,
+		ExpiryMonth: doc.ExpiryMonth,
+		ExpiryYear:  doc.ExpiryYear,
+		IsDefault:   doc.IsDefault,
+		Active:      doc.Active,
+		CreatedAt:   doc.CreatedAt,
+		UpdatedAt:   doc.UpdatedAt,
+	}
+}
+
+// SavedCardMongoRepository implements portout.SavedCardRepository.
+type SavedCardMongoRepository struct {
+	col *mongo.Collection
+}
+
+// NewSavedCardRepository creates a SavedCardRepository backed by MongoDB.
+func NewSavedCardRepository(client *Client) portout.SavedCardRepository {
+	return &SavedCardMongoRepository{col: client.Collection("saved_credit_cards")}
+}
+
+// FindByUserID returns all active saved cards for a user.
+func (r *SavedCardMongoRepository) FindByUserID(ctx context.Context, userID string) ([]domain.SavedCard, error) {
+	filter := bson.D{
+		{Key: "user_id", Value: userIDValue(userID)},
+		{Key: "active", Value: bson.D{{Key: "$ne", Value: false}}},
+	}
+	cur, err := r.col.Find(ctx, filter)
+	if err != nil {
+		return []domain.SavedCard{}, nil
+	}
+	defer cur.Close(ctx)
+
+	result := make([]domain.SavedCard, 0)
+	for cur.Next(ctx) {
+		var doc savedCardDocument
+		if err := cur.Decode(&doc); err != nil {
+			continue
+		}
+		result = append(result, *savedCardDocToDomain(doc))
+	}
+	return result, nil
+}
+
+// FindByID returns a single saved card by ID, verifying ownership via userID.
+func (r *SavedCardMongoRepository) FindByID(ctx context.Context, id, userID string) (*domain.SavedCard, error) {
+	filter := parseIDToFilter(id)
+	filter = append(filter, bson.E{Key: "user_id", Value: userIDValue(userID)})
+
+	var doc savedCardDocument
+	if err := r.col.FindOne(ctx, filter).Decode(&doc); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, apierr.NotFound("saved_card", id)
+		}
+		return nil, apierr.Internal(err.Error())
+	}
+	return savedCardDocToDomain(doc), nil
+}
+
+// Save inserts a new saved card.
+func (r *SavedCardMongoRepository) Save(ctx context.Context, card *domain.SavedCard) (*domain.SavedCard, error) {
+	now := time.Now().UTC()
+	if card.CreatedAt.IsZero() {
+		card.CreatedAt = now
+	}
+	card.UpdatedAt = now
+	card.Active = true
+
+	doc := savedCardDocument{
+		UserID:      userIDValue(card.UserID),
+		LastFour:    card.LastFour,
+		Brand:       card.Brand,
+		HolderName:  card.HolderName,
+		ExpiryMonth: card.ExpiryMonth,
+		ExpiryYear:  card.ExpiryYear,
+		IsDefault:   card.IsDefault,
+		Active:      card.Active,
+		CreatedAt:   card.CreatedAt,
+		UpdatedAt:   card.UpdatedAt,
+	}
+	res, err := r.col.InsertOne(ctx, doc)
+	if err != nil {
+		return nil, apierr.Internal("saving saved_card: " + err.Error())
+	}
+	card.ID = rawIDToString(res.InsertedID)
+	return card, nil
+}
+
+// ClearDefault removes the is_default flag from all saved cards belonging to userID.
+func (r *SavedCardMongoRepository) ClearDefault(ctx context.Context, userID string) error {
+	filter := bson.D{{Key: "user_id", Value: userIDValue(userID)}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "is_default", Value: false}}}}
+	_, err := r.col.UpdateMany(ctx, filter, update)
+	if err != nil {
+		return apierr.Internal(err.Error())
+	}
+	return nil
+}
+
+// SoftDelete marks a saved card as inactive.
+func (r *SavedCardMongoRepository) SoftDelete(ctx context.Context, id, userID string) error {
+	filter := parseIDToFilter(id)
+	filter = append(filter, bson.E{Key: "user_id", Value: userIDValue(userID)})
+	update := bson.D{{Key: "$set", Value: bson.D{
+		{Key: "active", Value: false},
+		{Key: "atualizado_em", Value: time.Now().UTC()},
+	}}}
+	_, err := r.col.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return apierr.Internal(err.Error())
+	}
+	return nil
+}
+
+// ===================================================================
+// InstallmentQueryRepository — collection: payment_installments
+// Used by the payment handler's installment query endpoints.
+// ===================================================================
+
+type paymentInstallmentDocument struct {
+	ID            any        `bson:"_id,omitempty"`
+	EventID       any        `bson:"event_id"`
+	UserID        any        `bson:"user_id,omitempty"`
+	ParticipantID any        `bson:"participant_id,omitempty"`
+	Amount        int64      `bson:"amount"`
+	Status        string     `bson:"status"`
+	PaymentMethod string     `bson:"payment_method,omitempty"`
+	DueDate       time.Time  `bson:"due_date,omitempty"`
+	PaidAt        *time.Time `bson:"paid_at,omitempty"`
+}
+
+func paymentInstallmentDocToDomain(doc paymentInstallmentDocument) domain.Installment {
+	return domain.Installment{
+		ID:            rawIDToString(doc.ID),
+		EventID:       rawIDToString(doc.EventID),
+		UserID:        rawIDToString(doc.UserID),
+		ParticipantID: rawIDToString(doc.ParticipantID),
+		Amount:        doc.Amount,
+		Status:        doc.Status,
+		PaymentMethod: doc.PaymentMethod,
+		DueDate:       doc.DueDate,
+		PaidAt:        doc.PaidAt,
+	}
+}
+
+// InstallmentQueryMongoRepository implements portout.InstallmentQueryRepository.
+type InstallmentQueryMongoRepository struct {
+	col *mongo.Collection
+}
+
+// NewInstallmentQueryRepository creates an InstallmentQueryRepository backed by MongoDB.
+func NewInstallmentQueryRepository(client *Client) portout.InstallmentQueryRepository {
+	return &InstallmentQueryMongoRepository{col: client.Collection("payment_installments")}
+}
+
+// FindByFilters queries installments by optional eventID, userID, and status.
+func (r *InstallmentQueryMongoRepository) FindByFilters(ctx context.Context, eventID, userID, status string) ([]domain.Installment, error) {
+	filter := bson.D{}
+	if eventID != "" {
+		filter = append(filter, bson.E{Key: "event_id", Value: UUIDStringToBinary(eventID)})
+	}
+	if userID != "" {
+		filter = append(filter, bson.E{Key: "user_id", Value: userIDValue(userID)})
+	}
+	if status != "" {
+		filter = append(filter, bson.E{Key: "status", Value: status})
+	}
+
+	opts := options.Find().SetSort(bson.D{{Key: "due_date", Value: 1}})
+	cur, err := r.col.Find(ctx, filter, opts)
+	if err != nil {
+		return []domain.Installment{}, nil
+	}
+	defer cur.Close(ctx)
+
+	result := make([]domain.Installment, 0)
+	for cur.Next(ctx) {
+		var doc paymentInstallmentDocument
+		if err := cur.Decode(&doc); err != nil {
+			continue
+		}
+		result = append(result, paymentInstallmentDocToDomain(doc))
+	}
+	return result, nil
+}
+
+// FindByUserID returns all installments for a user, optionally filtered by status.
+func (r *InstallmentQueryMongoRepository) FindByUserID(ctx context.Context, userID, status string) ([]domain.Installment, error) {
+	filter := bson.D{{Key: "user_id", Value: userIDValue(userID)}}
+	if status != "" {
+		filter = append(filter, bson.E{Key: "status", Value: status})
+	}
+
+	opts := options.Find().SetSort(bson.D{{Key: "due_date", Value: 1}})
+	cur, err := r.col.Find(ctx, filter, opts)
+	if err != nil {
+		return []domain.Installment{}, nil
+	}
+	defer cur.Close(ctx)
+
+	result := make([]domain.Installment, 0)
+	for cur.Next(ctx) {
+		var doc paymentInstallmentDocument
+		if err := cur.Decode(&doc); err != nil {
+			continue
+		}
+		result = append(result, paymentInstallmentDocToDomain(doc))
+	}
+	return result, nil
 }

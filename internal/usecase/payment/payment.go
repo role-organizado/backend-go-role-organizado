@@ -235,3 +235,89 @@ func NewGetConfigPagamento(r portout.EventoConfigPagamentoRepository) *GetConfig
 func (uc *GetConfigPagamento) Execute(ctx context.Context, eventoID, _ string) (*domain.EventoConfigPagamento, error) {
 	return uc.configs.FindByEventoID(ctx, eventoID)
 }
+
+// ---- ManageSavedCards ----
+
+// ManageSavedCards implements portin.ManageSavedCardsUseCase.
+type ManageSavedCards struct {
+	cards portout.SavedCardRepository
+}
+
+// NewManageSavedCards creates a new ManageSavedCards use case.
+func NewManageSavedCards(cards portout.SavedCardRepository) *ManageSavedCards {
+	return &ManageSavedCards{cards: cards}
+}
+
+// List returns all active saved cards for the user.
+func (uc *ManageSavedCards) List(ctx context.Context, userID string) ([]domain.SavedCard, error) {
+	return uc.cards.FindByUserID(ctx, userID)
+}
+
+// Create saves a new credit card for the user.
+func (uc *ManageSavedCards) Create(ctx context.Context, in portin.CreateSavedCardInput) (*domain.SavedCard, error) {
+	now := time.Now()
+	card := &domain.SavedCard{
+		UserID:      in.UserID,
+		LastFour:    in.LastFour,
+		Brand:       in.Brand,
+		HolderName:  in.HolderName,
+		ExpiryMonth: in.ExpiryMonth,
+		ExpiryYear:  in.ExpiryYear,
+		IsDefault:   in.IsDefault,
+		Active:      true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	return uc.cards.Save(ctx, card)
+}
+
+// Get retrieves a saved card by ID, enforcing ownership.
+func (uc *ManageSavedCards) Get(ctx context.Context, id, userID string) (*domain.SavedCard, error) {
+	return uc.cards.FindByID(ctx, id, userID)
+}
+
+// Delete soft-deletes a saved card, enforcing ownership.
+func (uc *ManageSavedCards) Delete(ctx context.Context, id, userID string) error {
+	return uc.cards.SoftDelete(ctx, id, userID)
+}
+
+// SetDefault designates a saved card as the user's default.
+func (uc *ManageSavedCards) SetDefault(ctx context.Context, id, userID string) error {
+	// Verify ownership first.
+	if _, err := uc.cards.FindByID(ctx, id, userID); err != nil {
+		return err
+	}
+	if err := uc.cards.ClearDefault(ctx, userID); err != nil {
+		return err
+	}
+	card, err := uc.cards.FindByID(ctx, id, userID)
+	if err != nil {
+		return err
+	}
+	card.IsDefault = true
+	card.UpdatedAt = time.Now()
+	_, err = uc.cards.Save(ctx, card)
+	return err
+}
+
+// ---- QueryInstallments ----
+
+// QueryInstallments implements portin.QueryInstallmentsUseCase.
+type QueryInstallments struct {
+	installments portout.InstallmentQueryRepository
+}
+
+// NewQueryInstallments creates a new QueryInstallments use case.
+func NewQueryInstallments(installments portout.InstallmentQueryRepository) *QueryInstallments {
+	return &QueryInstallments{installments: installments}
+}
+
+// Query returns installments filtered by eventID, userID, and/or status.
+func (uc *QueryInstallments) Query(ctx context.Context, in portin.QueryInstallmentsInput) ([]domain.Installment, error) {
+	return uc.installments.FindByFilters(ctx, in.EventID, in.UserID, in.Status)
+}
+
+// GetForUser returns all installments for a user, optionally filtered by status.
+func (uc *QueryInstallments) GetForUser(ctx context.Context, in portin.GetUserInstallmentsInput) ([]domain.Installment, error) {
+	return uc.installments.FindByUserID(ctx, in.UserID, in.Status)
+}

@@ -10,18 +10,21 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
 	portin "github.com/role-organizado/backend-go-role-organizado/internal/port/in"
+	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
 
-// PaymentHandler handles payment and payment config HTTP endpoints.
+// PaymentHandler handles payment, payment config, saved-cards, and installments endpoints.
 type PaymentHandler struct {
-	createUC    portin.CreatePagamentoUseCase
-	getUC       portin.GetPagamentoUseCase
-	listUC      portin.ListPagamentosUseCase
-	updateUC    portin.UpdatePagamentoUseCase
-	deleteUC    portin.DeletePagamentoUseCase
-	confirmarUC portin.ConfirmarPagamentoUseCase
-	upsertCfgUC portin.UpsertConfigPagamentoUseCase
-	getCfgUC    portin.GetConfigPagamentoUseCase
+	createUC     portin.CreatePagamentoUseCase
+	getUC        portin.GetPagamentoUseCase
+	listUC       portin.ListPagamentosUseCase
+	updateUC     portin.UpdatePagamentoUseCase
+	deleteUC     portin.DeletePagamentoUseCase
+	confirmarUC  portin.ConfirmarPagamentoUseCase
+	upsertCfgUC  portin.UpsertConfigPagamentoUseCase
+	getCfgUC     portin.GetConfigPagamentoUseCase
+	savedCardsUC portin.ManageSavedCardsUseCase
+	installUC    portin.QueryInstallmentsUseCase
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
@@ -34,20 +37,24 @@ func NewPaymentHandler(
 	confirmar portin.ConfirmarPagamentoUseCase,
 	upsertCfg portin.UpsertConfigPagamentoUseCase,
 	getCfg portin.GetConfigPagamentoUseCase,
+	savedCards portin.ManageSavedCardsUseCase,
+	install portin.QueryInstallmentsUseCase,
 ) *PaymentHandler {
 	return &PaymentHandler{
-		createUC:    create,
-		getUC:       get,
-		listUC:      list,
-		updateUC:    update,
-		deleteUC:    del,
-		confirmarUC: confirmar,
-		upsertCfgUC: upsertCfg,
-		getCfgUC:    getCfg,
+		createUC:     create,
+		getUC:        get,
+		listUC:       list,
+		updateUC:     update,
+		deleteUC:     del,
+		confirmarUC:  confirmar,
+		upsertCfgUC:  upsertCfg,
+		getCfgUC:     getCfg,
+		savedCardsUC: savedCards,
+		installUC:    install,
 	}
 }
 
-// RegisterPaymentRoutes registers all payment routes on the router.
+// RegisterPaymentRoutes registers all payment, saved-cards, and installments routes.
 func (h *PaymentHandler) RegisterPaymentRoutes(r chi.Router) {
 	r.Get("/api/payments", h.listPagamentos)
 	r.Post("/api/payments", h.createPagamento)
@@ -60,7 +67,7 @@ func (h *PaymentHandler) RegisterPaymentRoutes(r chi.Router) {
 
 	r.Get("/api/v1/payments", h.listPagamentos)
 	r.Post("/api/v1/payments", h.createPagamento)
-	r.Post("/api/v1/payments/process", h.processPagamento)  // Temporal async processing (stub)
+	r.Post("/api/v1/payments/process", h.processPagamento) // Temporal async processing (stub)
 	r.Get("/api/v1/payments/user", h.listPagamentos)       // Java-compat alias
 	r.Get("/api/v1/payments/{id}", h.getPagamento)
 	r.Put("/api/v1/payments/{id}", h.updatePagamento)
@@ -68,6 +75,17 @@ func (h *PaymentHandler) RegisterPaymentRoutes(r chi.Router) {
 	r.Post("/api/v1/payments/{id}/confirmar", h.confirmarPagamento)
 	r.Get("/api/v1/payments/config", h.getConfig)
 	r.Put("/api/v1/payments/config", h.upsertConfig)
+
+	// Saved credit cards (moved from finance handler)
+	r.Get("/api/v1/saved-cards", h.listSavedCards)
+	r.Post("/api/v1/saved-cards", h.createSavedCard)
+	r.Get("/api/v1/saved-cards/{cardId}", h.getSavedCard)
+	r.Delete("/api/v1/saved-cards/{cardId}", h.deleteSavedCard)
+	r.Post("/api/v1/saved-cards/{cardId}/set-default", h.setDefaultSavedCard)
+
+	// Installments query (moved from finance handler)
+	r.Get("/api/v1/installments", h.queryInstallments)
+	r.Get("/api/v1/installments/user", h.getUserInstallments)
 }
 
 // ---- Request types ----
@@ -247,6 +265,122 @@ func (h *PaymentHandler) upsertConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
+}
+
+// ---- Saved cards ----
+
+type createSavedCardRequest struct {
+	LastFour    string `json:"lastFour"`
+	Brand       string `json:"brand"`
+	HolderName  string `json:"holderName"`
+	ExpiryMonth int    `json:"expiryMonth"`
+	ExpiryYear  int    `json:"expiryYear"`
+	IsDefault   bool   `json:"isDefault"`
+}
+
+func (h *PaymentHandler) listSavedCards(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, apierr.Unauthorized("usuário não autenticado"))
+		return
+	}
+	cards, err := h.savedCardsUC.List(r.Context(), userID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cards)
+}
+
+func (h *PaymentHandler) createSavedCard(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, apierr.Unauthorized("usuário não autenticado"))
+		return
+	}
+	var req createSavedCardRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, apierr.BadRequest("corpo inválido"))
+		return
+	}
+	card, err := h.savedCardsUC.Create(r.Context(), portin.CreateSavedCardInput{
+		UserID:      userID,
+		LastFour:    req.LastFour,
+		Brand:       req.Brand,
+		HolderName:  req.HolderName,
+		ExpiryMonth: req.ExpiryMonth,
+		ExpiryYear:  req.ExpiryYear,
+		IsDefault:   req.IsDefault,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, card)
+}
+
+func (h *PaymentHandler) getSavedCard(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	cardID := chi.URLParam(r, "cardId")
+	card, err := h.savedCardsUC.Get(r.Context(), cardID, userID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, card)
+}
+
+func (h *PaymentHandler) deleteSavedCard(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	cardID := chi.URLParam(r, "cardId")
+	if err := h.savedCardsUC.Delete(r.Context(), cardID, userID); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *PaymentHandler) setDefaultSavedCard(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	cardID := chi.URLParam(r, "cardId")
+	if err := h.savedCardsUC.SetDefault(r.Context(), cardID, userID); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// ---- Installments ----
+
+func (h *PaymentHandler) queryInstallments(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	result, err := h.installUC.Query(r.Context(), portin.QueryInstallmentsInput{
+		EventID: q.Get("eventId"),
+		UserID:  q.Get("userId"),
+		Status:  q.Get("status"),
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *PaymentHandler) getUserInstallments(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, apierr.Unauthorized("usuário não autenticado"))
+		return
+	}
+	result, err := h.installUC.GetForUser(r.Context(), portin.GetUserInstallmentsInput{
+		UserID: userID,
+		Status: r.URL.Query().Get("status"),
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ---- Response helpers ----

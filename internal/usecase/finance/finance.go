@@ -692,3 +692,31 @@ func (uc *ManagePaymentAccounts) Delete(ctx context.Context, accountID, userID s
 	}
 	return nil
 }
+
+// ---- UC 10: GetAuditTrail ----
+
+// GetAuditTrail returns the paginated audit trail for an event.
+// Returns an empty list gracefully if the audit_trail collection does not exist or is empty.
+type GetAuditTrail struct {
+	auditTrail portout.AuditTrailRepository
+}
+
+// NewGetAuditTrail creates a new GetAuditTrail use case.
+func NewGetAuditTrail(auditTrail portout.AuditTrailRepository) *GetAuditTrail {
+	return &GetAuditTrail{auditTrail: auditTrail}
+}
+
+// Execute returns paged audit entries for the event.
+func (uc *GetAuditTrail) Execute(ctx context.Context, in portin.GetAuditTrailInput) ([]domain.AuditEntry, int64, error) {
+	size := max(1, min(100, in.Size))
+	page := max(0, in.Page)
+
+	entries, total, err := uc.auditTrail.FindByEventID(ctx, in.EventID, page, size)
+	if err != nil {
+		return []domain.AuditEntry{}, 0, fmt.Errorf("buscar audit trail: %w", err)
+	}
+	if entries == nil {
+		entries = []domain.AuditEntry{}
+	}
+	return entries, total, nil
+}

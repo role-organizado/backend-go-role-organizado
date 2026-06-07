@@ -116,6 +116,16 @@ type EventPaymentStatus struct {
 	PendingCount int
 }
 
+// AuditEntry represents a single audit event in the event's audit trail.
+type AuditEntry struct {
+	ID          string
+	EventID     string
+	Action      string
+	ActorID     string
+	Description string
+	OccurredAt  time.Time
+}
+
 // ---- Domain functions ----
 
 // CalculateProgress returns collected/goal*100 rounded HALF_UP to 4 decimal places.

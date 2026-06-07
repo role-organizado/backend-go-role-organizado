@@ -63,6 +63,14 @@ type GetEventPaymentStatusInput struct {
 	UserID  string
 }
 
+// GetAuditTrailInput holds the input for retrieving the audit trail for an event.
+type GetAuditTrailInput struct {
+	EventID string
+	UserID  string
+	Page    int
+	Size    int
+}
+
 // ListPaymentAccountsInput holds the input for listing a user's payment accounts.
 type ListPaymentAccountsInput struct {
 	UserID string
@@ -141,4 +149,9 @@ type ManagePaymentAccountsUseCase interface {
 	Update(ctx context.Context, in UpdatePaymentAccountInput) (*domain.PaymentAccount, error)
 	SetDefault(ctx context.Context, accountID, userID string) error
 	Delete(ctx context.Context, accountID, userID string) error
+}
+
+// GetAuditTrailUseCase returns the paginated audit trail for an event.
+type GetAuditTrailUseCase interface {
+	Execute(ctx context.Context, in GetAuditTrailInput) ([]domain.AuditEntry, int64, error)
 }

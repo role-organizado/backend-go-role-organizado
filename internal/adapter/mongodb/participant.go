@@ -8,6 +8,11 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/finance"
+	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
+	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
 
 // ParticipanteMongoRepository persists participant documents to MongoDB.
@@ -20,6 +25,222 @@ type ParticipanteMongoRepository struct {
 func NewParticipanteRepository(client *Client) *ParticipanteMongoRepository {
 	return &ParticipanteMongoRepository{col: client.Collection("participants")}
 }
+
+// ===================================================================
+// ParticipantMongoRepository — read-side, implements portout.ParticipantRepository
+// Queries the 'participants' collection for the finance domain use cases.
+// ===================================================================
+
+type participantDocument struct {
+	ID      interface{} `bson:"_id,omitempty"`
+	EventID bson.Binary `bson:"evento_id"`
+	UserID  interface{} `bson:"usuario_id"`
+	Papel   string      `bson:"papel"`
+	Status  string      `bson:"status"`
+	Nome    string      `bson:"nome,omitempty"`
+	Email   string      `bson:"email,omitempty"`
+}
+
+func participantDocToDomain(doc participantDocument) domain.Participant {
+	return domain.Participant{
+		ID:      rawIDToString(doc.ID),
+		EventID: uuidBinaryToString(doc.EventID),
+		UserID:  rawIDToString(doc.UserID),
+		Name:    doc.Nome,
+		Email:   doc.Email,
+		Status:  doc.Status,
+	}
+}
+
+// ParticipantMongoRepository implements portout.ParticipantRepository (read-side).
+type ParticipantMongoRepository struct {
+	col *mongo.Collection
+}
+
+// NewParticipantRepository creates a read-side ParticipantRepository.
+func NewParticipantRepository(client *Client) portout.ParticipantRepository {
+	return &ParticipantMongoRepository{col: client.Collection("participants")}
+}
+
+// FindByUserID returns all participations for the given user.
+func (r *ParticipantMongoRepository) FindByUserID(ctx context.Context, userID string) ([]domain.Participant, error) {
+	filter := bson.D{{Key: "usuario_id", Value: userIDValue(userID)}}
+	cur, err := r.col.Find(ctx, filter)
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+
+	var result []domain.Participant
+	for cur.Next(ctx) {
+		var doc participantDocument
+		if err := cur.Decode(&doc); err != nil {
+			return nil, apierr.Internal(err.Error())
+		}
+		result = append(result, participantDocToDomain(doc))
+	}
+	if err := cur.Err(); err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	return result, nil
+}
+
+// FindByEventID returns a paginated list of participants for the given event.
+func (r *ParticipantMongoRepository) FindByEventID(ctx context.Context, eventID string, page, size int) ([]domain.Participant, int64, error) {
+	filter := bson.D{{Key: "evento_id", Value: UUIDStringToBinary(eventID)}}
+
+	total, err := r.col.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, apierr.Internal(err.Error())
+	}
+
+	skip := int64(page * size)
+	opts := options.Find().SetSkip(skip).SetLimit(int64(size))
+	cur, err := r.col.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, 0, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+
+	var result []domain.Participant
+	for cur.Next(ctx) {
+		var doc participantDocument
+		if err := cur.Decode(&doc); err != nil {
+			return nil, 0, apierr.Internal(err.Error())
+		}
+		result = append(result, participantDocToDomain(doc))
+	}
+	if err := cur.Err(); err != nil {
+		return nil, 0, apierr.Internal(err.Error())
+	}
+	return result, total, nil
+}
+
+// FindByEventIDAndUserID returns the participation for a specific user in a specific event.
+func (r *ParticipantMongoRepository) FindByEventIDAndUserID(ctx context.Context, eventID, userID string) (*domain.Participant, error) {
+	filter := bson.D{
+		{Key: "evento_id", Value: UUIDStringToBinary(eventID)},
+		{Key: "usuario_id", Value: userIDValue(userID)},
+	}
+	var doc participantDocument
+	if err := r.col.FindOne(ctx, filter).Decode(&doc); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, apierr.NotFound("participant", userID)
+		}
+		return nil, apierr.Internal(err.Error())
+	}
+	p := participantDocToDomain(doc)
+	return &p, nil
+}
+
+// ===================================================================
+// PaymentInstallmentMongoRepository — implements portout.PaymentInstallmentRepository
+// Queries the 'payment_installments' collection for finance domain use cases.
+// ===================================================================
+
+type installmentDocument struct {
+	ID            interface{} `bson:"_id,omitempty"`
+	EventID       bson.Binary `bson:"event_id"`
+	UserID        interface{} `bson:"user_id,omitempty"`
+	ParticipantID bson.Binary `bson:"participant_id,omitempty"`
+	Amount        int64       `bson:"amount"`
+	Status        string      `bson:"status"`
+	PaymentMethod string      `bson:"payment_method,omitempty"`
+	DueDate       time.Time   `bson:"due_date,omitempty"`
+	PaidAt        *time.Time  `bson:"paid_at,omitempty"`
+}
+
+func installmentDocToDomain(doc installmentDocument) domain.PaymentInstallment {
+	return domain.PaymentInstallment{
+		ID:            rawIDToString(doc.ID),
+		EventID:       uuidBinaryToString(doc.EventID),
+		ParticipantID: uuidBinaryToString(doc.ParticipantID),
+		Amount:        doc.Amount,
+		Status:        doc.Status,
+		PaymentMethod: doc.PaymentMethod,
+		PaidAt:        doc.PaidAt,
+	}
+}
+
+// PaymentInstallmentMongoRepository implements portout.PaymentInstallmentRepository.
+type PaymentInstallmentMongoRepository struct {
+	col *mongo.Collection
+}
+
+// NewPaymentInstallmentRepository creates a PaymentInstallmentRepository backed by MongoDB.
+func NewPaymentInstallmentRepository(client *Client) portout.PaymentInstallmentRepository {
+	return &PaymentInstallmentMongoRepository{col: client.Collection("payment_installments")}
+}
+
+// FindByEventID returns all installments for the given event.
+func (r *PaymentInstallmentMongoRepository) FindByEventID(ctx context.Context, eventID string) ([]domain.PaymentInstallment, error) {
+	filter := bson.D{{Key: "event_id", Value: UUIDStringToBinary(eventID)}}
+	cur, err := r.col.Find(ctx, filter)
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+
+	var result []domain.PaymentInstallment
+	for cur.Next(ctx) {
+		var doc installmentDocument
+		if err := cur.Decode(&doc); err != nil {
+			return nil, apierr.Internal(err.Error())
+		}
+		result = append(result, installmentDocToDomain(doc))
+	}
+	return result, cur.Err()
+}
+
+// FindByParticipantID returns all installments for a participant in a specific event.
+func (r *PaymentInstallmentMongoRepository) FindByParticipantID(ctx context.Context, eventID, participantID string) ([]domain.PaymentInstallment, error) {
+	filter := bson.D{
+		{Key: "event_id", Value: UUIDStringToBinary(eventID)},
+		{Key: "participant_id", Value: UUIDStringToBinary(participantID)},
+	}
+	cur, err := r.col.Find(ctx, filter)
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+
+	var result []domain.PaymentInstallment
+	for cur.Next(ctx) {
+		var doc installmentDocument
+		if err := cur.Decode(&doc); err != nil {
+			return nil, apierr.Internal(err.Error())
+		}
+		result = append(result, installmentDocToDomain(doc))
+	}
+	return result, cur.Err()
+}
+
+// FindPendingByEventID returns all PENDING or OVERDUE installments for the given event.
+func (r *PaymentInstallmentMongoRepository) FindPendingByEventID(ctx context.Context, eventID string) ([]domain.PaymentInstallment, error) {
+	filter := bson.D{
+		{Key: "event_id", Value: UUIDStringToBinary(eventID)},
+		{Key: "status", Value: bson.D{{Key: "$in", Value: bson.A{"PENDING", "OVERDUE"}}}},
+	}
+	cur, err := r.col.Find(ctx, filter)
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+
+	var result []domain.PaymentInstallment
+	for cur.Next(ctx) {
+		var doc installmentDocument
+		if err := cur.Decode(&doc); err != nil {
+			return nil, apierr.Internal(err.Error())
+		}
+		result = append(result, installmentDocToDomain(doc))
+	}
+	return result, cur.Err()
+}
+
+// ===================================================================
+// ParticipanteMongoRepository — write-side, implements portout.ParticipanteRepository
+// ===================================================================
 
 // SaveOrganizador creates a participant document for the event creator with
 // papel=ORGANIZADOR and status=CONFIRMADO, matching Java's auto-registration behaviour.
