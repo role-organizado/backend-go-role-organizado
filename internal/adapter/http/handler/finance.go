@@ -27,7 +27,7 @@ type FinanceHandler struct {
 	sendRemindersUC portin.SendPaymentRemindersUseCase
 	holdBalanceUC   portin.CalculateHoldBalanceUseCase
 	paymentStatusUC portin.GetEventPaymentStatusUseCase
-	paymentAccountsUC portin.ManagePaymentAccountsUseCase
+	paymentAccountsUC portin.FinanceManageAccountsUseCase
 	auditTrailUC    portin.GetAuditTrailUseCase
 }
 
@@ -41,7 +41,7 @@ func NewFinanceHandler(
 	sendRemindersUC portin.SendPaymentRemindersUseCase,
 	holdBalanceUC portin.CalculateHoldBalanceUseCase,
 	paymentStatusUC portin.GetEventPaymentStatusUseCase,
-	paymentAccountsUC portin.ManagePaymentAccountsUseCase,
+	paymentAccountsUC portin.FinanceManageAccountsUseCase,
 	auditTrailUC portin.GetAuditTrailUseCase,
 ) *FinanceHandler {
 	return &FinanceHandler{
@@ -340,7 +340,7 @@ func (h *FinanceHandler) createPaymentAccount(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	account, err := h.paymentAccountsUC.Create(r.Context(), portin.CreatePaymentAccountInput{
+	account, err := h.paymentAccountsUC.Create(r.Context(), portin.FinanceCreateAccountInput{
 		UserID:     userID,
 		Type:       req.Type,
 		PixKey:     req.PixKey,
@@ -366,7 +366,7 @@ func (h *FinanceHandler) updatePaymentAccount(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	account, err := h.paymentAccountsUC.Update(r.Context(), portin.UpdatePaymentAccountInput{
+	account, err := h.paymentAccountsUC.Update(r.Context(), portin.FinanceUpdateAccountInput{
 		AccountID:  accountID,
 		UserID:     userID,
 		Type:       req.Type,

@@ -239,13 +239,13 @@ func (uc *GetLedgerStatement) Execute(ctx context.Context, in portin.GetLedgerSt
 // GetParticipantsStatus returns the payment status for each participant of an event.
 type GetParticipantsStatus struct {
 	participants portout.ParticipantRepository
-	installments portout.PaymentInstallmentRepository
+	installments portout.FinanceInstallmentRepository
 }
 
 // NewGetParticipantsStatus creates a new GetParticipantsStatus use case.
 func NewGetParticipantsStatus(
 	participants portout.ParticipantRepository,
-	installments portout.PaymentInstallmentRepository,
+	installments portout.FinanceInstallmentRepository,
 ) *GetParticipantsStatus {
 	return &GetParticipantsStatus{participants: participants, installments: installments}
 }
@@ -310,14 +310,14 @@ func (uc *GetParticipantsStatus) Execute(ctx context.Context, in portin.GetParti
 type RecalculateFinanceSummary struct {
 	summaries    portout.FinanceSummaryRepository
 	rateios      portout.RateioRepository
-	installments portout.PaymentInstallmentRepository
+	installments portout.FinanceInstallmentRepository
 }
 
 // NewRecalculateFinanceSummary creates a new RecalculateFinanceSummary use case.
 func NewRecalculateFinanceSummary(
 	summaries portout.FinanceSummaryRepository,
 	rateios portout.RateioRepository,
-	installments portout.PaymentInstallmentRepository,
+	installments portout.FinanceInstallmentRepository,
 ) *RecalculateFinanceSummary {
 	return &RecalculateFinanceSummary{
 		summaries:    summaries,
@@ -391,7 +391,7 @@ type PaymentReminderDispatcher interface {
 // SendPaymentReminders dispatches payment reminders to participants with pending/overdue installments.
 type SendPaymentReminders struct {
 	participants portout.ParticipantRepository
-	installments portout.PaymentInstallmentRepository
+	installments portout.FinanceInstallmentRepository
 	dispatcher   PaymentReminderDispatcher // nil → log only (Temporal unavailable)
 }
 
@@ -399,7 +399,7 @@ type SendPaymentReminders struct {
 // dispatcher may be nil — in that case reminders are logged but not dispatched.
 func NewSendPaymentReminders(
 	participants portout.ParticipantRepository,
-	installments portout.PaymentInstallmentRepository,
+	installments portout.FinanceInstallmentRepository,
 	dispatcher PaymentReminderDispatcher,
 ) *SendPaymentReminders {
 	return &SendPaymentReminders{
@@ -446,13 +446,13 @@ var defaultHoldDays = map[string]int{
 
 // CalculateHoldBalance calculates the blocked and available balance breakdown for an event.
 type CalculateHoldBalance struct {
-	installments portout.PaymentInstallmentRepository
+	installments portout.FinanceInstallmentRepository
 	configRepo   portout.ConfiguracaoSistemaRepository
 }
 
 // NewCalculateHoldBalance creates a new CalculateHoldBalance use case.
 func NewCalculateHoldBalance(
-	installments portout.PaymentInstallmentRepository,
+	installments portout.FinanceInstallmentRepository,
 	configRepo portout.ConfiguracaoSistemaRepository,
 ) *CalculateHoldBalance {
 	return &CalculateHoldBalance{installments: installments, configRepo: configRepo}
@@ -523,13 +523,13 @@ func (uc *CalculateHoldBalance) Execute(ctx context.Context, in portin.Calculate
 
 // GetEventPaymentStatus aggregates installment counts and amounts by status for an event.
 type GetEventPaymentStatus struct {
-	installments portout.PaymentInstallmentRepository
+	installments portout.FinanceInstallmentRepository
 	participants portout.ParticipantRepository
 }
 
 // NewGetEventPaymentStatus creates a new GetEventPaymentStatus use case.
 func NewGetEventPaymentStatus(
-	installments portout.PaymentInstallmentRepository,
+	installments portout.FinanceInstallmentRepository,
 	participants portout.ParticipantRepository,
 ) *GetEventPaymentStatus {
 	return &GetEventPaymentStatus{installments: installments, participants: participants}
@@ -563,11 +563,11 @@ func (uc *GetEventPaymentStatus) Execute(ctx context.Context, in portin.GetEvent
 
 // ManagePaymentAccounts handles CRUD operations for user PIX/bank payment accounts.
 type ManagePaymentAccounts struct {
-	accounts portout.PaymentAccountRepository
+	accounts portout.FinanceAccountRepository
 }
 
 // NewManagePaymentAccounts creates a new ManagePaymentAccounts use case.
-func NewManagePaymentAccounts(accounts portout.PaymentAccountRepository) *ManagePaymentAccounts {
+func NewManagePaymentAccounts(accounts portout.FinanceAccountRepository) *ManagePaymentAccounts {
 	return &ManagePaymentAccounts{accounts: accounts}
 }
 
@@ -581,7 +581,7 @@ func (uc *ManagePaymentAccounts) List(ctx context.Context, in portin.ListPayment
 }
 
 // Create validates and persists a new payment account.
-func (uc *ManagePaymentAccounts) Create(ctx context.Context, in portin.CreatePaymentAccountInput) (*domain.PaymentAccount, error) {
+func (uc *ManagePaymentAccounts) Create(ctx context.Context, in portin.FinanceCreateAccountInput) (*domain.PaymentAccount, error) {
 	// Validar chave PIX quando tipo for PIX
 	if strings.ToUpper(in.Type) == "PIX" {
 		if err := domain.ValidatePixKey(in.PixType, in.PixKey); err != nil {
@@ -612,7 +612,7 @@ func (uc *ManagePaymentAccounts) Create(ctx context.Context, in portin.CreatePay
 }
 
 // Update validates and updates an existing payment account, enforcing ownership.
-func (uc *ManagePaymentAccounts) Update(ctx context.Context, in portin.UpdatePaymentAccountInput) (*domain.PaymentAccount, error) {
+func (uc *ManagePaymentAccounts) Update(ctx context.Context, in portin.FinanceUpdateAccountInput) (*domain.PaymentAccount, error) {
 	account, err := uc.accounts.FindByID(ctx, in.AccountID, in.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("buscar conta de pagamento: %w", err)

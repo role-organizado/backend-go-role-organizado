@@ -187,6 +187,12 @@ func (r *PagamentoMongoRepository) DeleteByID(ctx context.Context, id string) er
 
 // ---- EventoConfigPagamento ----
 
+// configPagamentoDocument maps the evento_config_pagamentos collection.
+//
+// Shared with the Java backend: Java writes camelCase keys (eventoId, platformFeePercent)
+// while Go writes snake_case keys (evento_id, metodos_pagamento). Fee fields are stored
+// as camelCase to match Java exactly. Pointer types on fee fields allow old documents
+// that lack those fields to decode without error (nil → zero value in domain).
 type configPagamentoDocument struct {
 	ID               bson.ObjectID `bson:"_id,omitempty"`
 	EventoID         string        `bson:"evento_id"`
@@ -197,6 +203,52 @@ type configPagamentoDocument struct {
 	InstrucoesBoleto string        `bson:"instrucoes_boleto,omitempty"`
 	CriadoEm        time.Time     `bson:"criado_em"`
 	UpdatedAt        time.Time     `bson:"updated_at"`
+
+	// Fee policy snapshot fields — camelCase to match Java AtualizarConfigPagamentoUseCase.
+	// Pointer types: nil if absent in old documents (backward-compatible decoding).
+	PlatformFeePercent    *float64 `bson:"platformFeePercent,omitempty"`
+	PspFeePercent         *float64 `bson:"pspFeePercent,omitempty"`
+	PlatformFeeFixedCents *int64   `bson:"platformFeeFixedCents,omitempty"`
+	PspFeeFixedCents      *int64   `bson:"pspFeeFixedCents,omitempty"`
+	FeePolicyVersion      string   `bson:"feePolicyVersion,omitempty"`
+
+	// Payment processing configuration.
+	PaymentProvider       string `bson:"paymentProvider,omitempty"`
+	PaymentFrequency      string `bson:"paymentFrequency,omitempty"`
+	PaymentReleaseTrigger string `bson:"paymentReleaseTrigger,omitempty"`
+}
+
+// derefFloat64 safely dereferences a *float64, returning 0 for nil.
+func derefFloat64(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+// derefInt64 safely dereferences a *int64, returning 0 for nil.
+func derefInt64(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+// feePercentPtr converts a float64 to a pointer, returning nil when the value
+// is 0 so the field is omitted from documents where no custom fee was configured.
+func feePercentPtr(f float64) *float64 {
+	if f == 0 {
+		return nil
+	}
+	return &f
+}
+
+// feeFixedPtr converts an int64 to a pointer, returning nil when the value is 0.
+func feeFixedPtr(i int64) *int64 {
+	if i == 0 {
+		return nil
+	}
+	return &i
 }
 
 func cfgDocToDomain(doc configPagamentoDocument) *domain.EventoConfigPagamento {
@@ -205,15 +257,48 @@ func cfgDocToDomain(doc configPagamentoDocument) *domain.EventoConfigPagamento {
 		methods[i] = domain.MetodoPagamento(m)
 	}
 	return &domain.EventoConfigPagamento{
-		ID:               doc.ID.Hex(),
-		EventoID:         doc.EventoID,
-		UsuarioID:        doc.UsuarioID,
-		MetodosPagamento: methods,
-		PrazoPagamento:   doc.PrazoPagamento,
-		ChavePix:         doc.ChavePix,
-		InstrucoesBoleto: doc.InstrucoesBoleto,
-		CriadoEm:        doc.CriadoEm,
-		UpdatedAt:        doc.UpdatedAt,
+		ID:                    doc.ID.Hex(),
+		EventoID:              doc.EventoID,
+		UsuarioID:             doc.UsuarioID,
+		MetodosPagamento:      methods,
+		PrazoPagamento:        doc.PrazoPagamento,
+		ChavePix:              doc.ChavePix,
+		InstrucoesBoleto:      doc.InstrucoesBoleto,
+		CriadoEm:             doc.CriadoEm,
+		UpdatedAt:             doc.UpdatedAt,
+		PlatformFeePercent:    derefFloat64(doc.PlatformFeePercent),
+		PspFeePercent:         derefFloat64(doc.PspFeePercent),
+		PlatformFeeFixedCents: derefInt64(doc.PlatformFeeFixedCents),
+		PspFeeFixedCents:      derefInt64(doc.PspFeeFixedCents),
+		FeePolicyVersion:      doc.FeePolicyVersion,
+		PaymentProvider:       doc.PaymentProvider,
+		PaymentFrequency:      doc.PaymentFrequency,
+		PaymentReleaseTrigger: doc.PaymentReleaseTrigger,
+	}
+}
+
+func cfgDomainToDoc(cfg *domain.EventoConfigPagamento) configPagamentoDocument {
+	methods := make([]string, len(cfg.MetodosPagamento))
+	for i, m := range cfg.MetodosPagamento {
+		methods[i] = string(m)
+	}
+	return configPagamentoDocument{
+		EventoID:              cfg.EventoID,
+		UsuarioID:             cfg.UsuarioID,
+		MetodosPagamento:      methods,
+		PrazoPagamento:        cfg.PrazoPagamento,
+		ChavePix:              cfg.ChavePix,
+		InstrucoesBoleto:      cfg.InstrucoesBoleto,
+		CriadoEm:             cfg.CriadoEm,
+		UpdatedAt:             cfg.UpdatedAt,
+		PlatformFeePercent:    feePercentPtr(cfg.PlatformFeePercent),
+		PspFeePercent:         feePercentPtr(cfg.PspFeePercent),
+		PlatformFeeFixedCents: feeFixedPtr(cfg.PlatformFeeFixedCents),
+		PspFeeFixedCents:      feeFixedPtr(cfg.PspFeeFixedCents),
+		FeePolicyVersion:      cfg.FeePolicyVersion,
+		PaymentProvider:       cfg.PaymentProvider,
+		PaymentFrequency:      cfg.PaymentFrequency,
+		PaymentReleaseTrigger: cfg.PaymentReleaseTrigger,
 	}
 }
 
@@ -227,33 +312,63 @@ func NewConfigPagamentoRepository(client *Client) *ConfigPagamentoMongoRepositor
 	return &ConfigPagamentoMongoRepository{col: client.Collection("evento_config_pagamentos")}
 }
 
+// FindByEventoID retrieves the payment config for eventID.
+// Queries both snake_case (evento_id — Go-written docs) and camelCase
+// (eventoId — Java-written docs) to support the shared collection.
 func (r *ConfigPagamentoMongoRepository) FindByEventoID(ctx context.Context, eventoID string) (*domain.EventoConfigPagamento, error) {
 	var doc configPagamentoDocument
-	err := r.col.FindOne(ctx, bson.M{"evento_id": eventoID}).Decode(&doc)
-	if err == mongo.ErrNoDocuments {
-		return nil, apierr.NotFound("config_pagamento", eventoID)
-	}
-	if err != nil {
+	filter := bson.D{{Key: "$or", Value: bson.A{
+		bson.D{{Key: "evento_id", Value: eventoID}},
+		bson.D{{Key: "eventoId", Value: eventoID}},
+	}}}
+	if err := r.col.FindOne(ctx, filter).Decode(&doc); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, apierr.NotFound("config_pagamento", eventoID)
+		}
 		return nil, apierr.Internal(err.Error())
 	}
 	return cfgDocToDomain(doc), nil
 }
 
+// FindAll returns all event payment configs. Used by ReaplicarFeePolicySnapshotUseCase.
+func (r *ConfigPagamentoMongoRepository) FindAll(ctx context.Context) ([]*domain.EventoConfigPagamento, error) {
+	cur, err := r.col.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+	var result []*domain.EventoConfigPagamento
+	for cur.Next(ctx) {
+		var doc configPagamentoDocument
+		if err := cur.Decode(&doc); err != nil {
+			return nil, apierr.Internal(err.Error())
+		}
+		result = append(result, cfgDocToDomain(doc))
+	}
+	return result, nil
+}
+
+// BulkUpdateFeeFields reapplies platformFeePercent and pspFeePercent to all
+// existing EventoConfigPagamento documents and sets their feePolicyVersion.
+// Returns the number of documents modified.
+func (r *ConfigPagamentoMongoRepository) BulkUpdateFeeFields(ctx context.Context, platformFee, pspFee float64, version string) (int64, error) {
+	update := bson.M{
+		"$set": bson.M{
+			"platformFeePercent": platformFee,
+			"pspFeePercent":      pspFee,
+			"feePolicyVersion":   version,
+			"updated_at":         time.Now(),
+		},
+	}
+	res, err := r.col.UpdateMany(ctx, bson.M{}, update)
+	if err != nil {
+		return 0, apierr.Internal(err.Error())
+	}
+	return res.ModifiedCount, nil
+}
+
 func (r *ConfigPagamentoMongoRepository) Save(ctx context.Context, cfg *domain.EventoConfigPagamento) (*domain.EventoConfigPagamento, error) {
-	methods := make([]string, len(cfg.MetodosPagamento))
-	for i, m := range cfg.MetodosPagamento {
-		methods[i] = string(m)
-	}
-	doc := configPagamentoDocument{
-		EventoID:         cfg.EventoID,
-		UsuarioID:        cfg.UsuarioID,
-		MetodosPagamento: methods,
-		PrazoPagamento:   cfg.PrazoPagamento,
-		ChavePix:         cfg.ChavePix,
-		InstrucoesBoleto: cfg.InstrucoesBoleto,
-		CriadoEm:        cfg.CriadoEm,
-		UpdatedAt:        cfg.UpdatedAt,
-	}
+	doc := cfgDomainToDoc(cfg)
 	res, err := r.col.InsertOne(ctx, doc)
 	if err != nil {
 		return nil, apierr.Internal(err.Error())
@@ -267,21 +382,8 @@ func (r *ConfigPagamentoMongoRepository) Update(ctx context.Context, cfg *domain
 	if err != nil {
 		return nil, apierr.NotFound("config_pagamento", cfg.ID)
 	}
-	methods := make([]string, len(cfg.MetodosPagamento))
-	for i, m := range cfg.MetodosPagamento {
-		methods[i] = string(m)
-	}
-	doc := configPagamentoDocument{
-		ID:               oid,
-		EventoID:         cfg.EventoID,
-		UsuarioID:        cfg.UsuarioID,
-		MetodosPagamento: methods,
-		PrazoPagamento:   cfg.PrazoPagamento,
-		ChavePix:         cfg.ChavePix,
-		InstrucoesBoleto: cfg.InstrucoesBoleto,
-		CriadoEm:        cfg.CriadoEm,
-		UpdatedAt:        cfg.UpdatedAt,
-	}
+	doc := cfgDomainToDoc(cfg)
+	doc.ID = oid
 	_, err = r.col.ReplaceOne(ctx, bson.M{"_id": oid}, doc, options.Replace().SetUpsert(false))
 	if err != nil {
 		return nil, apierr.Internal(err.Error())
@@ -433,7 +535,7 @@ func (r *SavedCardMongoRepository) SoftDelete(ctx context.Context, id, userID st
 // Used by the payment handler's installment query endpoints.
 // ===================================================================
 
-type paymentInstallmentDocument struct {
+type financeInstallmentQueryDocument struct {
 	ID            any        `bson:"_id,omitempty"`
 	EventID       any        `bson:"event_id"`
 	UserID        any        `bson:"user_id,omitempty"`
@@ -445,7 +547,7 @@ type paymentInstallmentDocument struct {
 	PaidAt        *time.Time `bson:"paid_at,omitempty"`
 }
 
-func paymentInstallmentDocToDomain(doc paymentInstallmentDocument) domain.Installment {
+func financeInstallmentQueryDocToDomain(doc financeInstallmentQueryDocument) domain.Installment {
 	return domain.Installment{
 		ID:            rawIDToString(doc.ID),
 		EventID:       rawIDToString(doc.EventID),
@@ -491,11 +593,11 @@ func (r *InstallmentQueryMongoRepository) FindByFilters(ctx context.Context, eve
 
 	result := make([]domain.Installment, 0)
 	for cur.Next(ctx) {
-		var doc paymentInstallmentDocument
+		var doc financeInstallmentQueryDocument
 		if err := cur.Decode(&doc); err != nil {
 			continue
 		}
-		result = append(result, paymentInstallmentDocToDomain(doc))
+		result = append(result, financeInstallmentQueryDocToDomain(doc))
 	}
 	return result, nil
 }
@@ -516,11 +618,11 @@ func (r *InstallmentQueryMongoRepository) FindByUserID(ctx context.Context, user
 
 	result := make([]domain.Installment, 0)
 	for cur.Next(ctx) {
-		var doc paymentInstallmentDocument
+		var doc financeInstallmentQueryDocument
 		if err := cur.Decode(&doc); err != nil {
 			continue
 		}
-		result = append(result, paymentInstallmentDocToDomain(doc))
+		result = append(result, financeInstallmentQueryDocToDomain(doc))
 	}
 	return result, nil
 }

@@ -27,7 +27,7 @@ type LedgerEntryRepository interface {
 }
 
 // PaymentAccountRepository defines persistence operations for user payment accounts (PIX/bank).
-type PaymentAccountRepository interface {
+type FinanceAccountRepository interface {
 	FindByUserID(ctx context.Context, userID string) ([]domain.PaymentAccount, error)
 	FindByID(ctx context.Context, id, userID string) (*domain.PaymentAccount, error)
 	Save(ctx context.Context, a *domain.PaymentAccount) (*domain.PaymentAccount, error)

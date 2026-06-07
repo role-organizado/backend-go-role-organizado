@@ -77,7 +77,7 @@ type ListPaymentAccountsInput struct {
 }
 
 // CreatePaymentAccountInput holds the data required to create a new payment account.
-type CreatePaymentAccountInput struct {
+type FinanceCreateAccountInput struct {
 	UserID     string
 	Type       string // PIX | BANK
 	PixKey     string
@@ -88,7 +88,7 @@ type CreatePaymentAccountInput struct {
 }
 
 // UpdatePaymentAccountInput holds the data required to update an existing payment account.
-type UpdatePaymentAccountInput struct {
+type FinanceUpdateAccountInput struct {
 	AccountID  string
 	UserID     string
 	Type       string
@@ -143,10 +143,10 @@ type GetEventPaymentStatusUseCase interface {
 }
 
 // ManagePaymentAccountsUseCase handles CRUD operations for user PIX/bank payment accounts.
-type ManagePaymentAccountsUseCase interface {
+type FinanceManageAccountsUseCase interface {
 	List(ctx context.Context, in ListPaymentAccountsInput) ([]domain.PaymentAccount, error)
-	Create(ctx context.Context, in CreatePaymentAccountInput) (*domain.PaymentAccount, error)
-	Update(ctx context.Context, in UpdatePaymentAccountInput) (*domain.PaymentAccount, error)
+	Create(ctx context.Context, in FinanceCreateAccountInput) (*domain.PaymentAccount, error)
+	Update(ctx context.Context, in FinanceUpdateAccountInput) (*domain.PaymentAccount, error)
 	SetDefault(ctx context.Context, accountID, userID string) error
 	Delete(ctx context.Context, accountID, userID string) error
 }

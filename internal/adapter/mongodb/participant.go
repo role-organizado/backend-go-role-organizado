@@ -163,17 +163,17 @@ func installmentDocToDomain(doc installmentDocument) domain.PaymentInstallment {
 }
 
 // PaymentInstallmentMongoRepository implements portout.PaymentInstallmentRepository.
-type PaymentInstallmentMongoRepository struct {
+type FinanceInstallmentMongoRepository struct {
 	col *mongo.Collection
 }
 
 // NewPaymentInstallmentRepository creates a PaymentInstallmentRepository backed by MongoDB.
-func NewPaymentInstallmentRepository(client *Client) portout.PaymentInstallmentRepository {
-	return &PaymentInstallmentMongoRepository{col: client.Collection("payment_installments")}
+func NewFinanceInstallmentRepository(client *Client) portout.FinanceInstallmentRepository {
+	return &FinanceInstallmentMongoRepository{col: client.Collection("payment_installments")}
 }
 
 // FindByEventID returns all installments for the given event.
-func (r *PaymentInstallmentMongoRepository) FindByEventID(ctx context.Context, eventID string) ([]domain.PaymentInstallment, error) {
+func (r *FinanceInstallmentMongoRepository) FindByEventID(ctx context.Context, eventID string) ([]domain.PaymentInstallment, error) {
 	filter := bson.D{{Key: "event_id", Value: UUIDStringToBinary(eventID)}}
 	cur, err := r.col.Find(ctx, filter)
 	if err != nil {
@@ -193,7 +193,7 @@ func (r *PaymentInstallmentMongoRepository) FindByEventID(ctx context.Context, e
 }
 
 // FindByParticipantID returns all installments for a participant in a specific event.
-func (r *PaymentInstallmentMongoRepository) FindByParticipantID(ctx context.Context, eventID, participantID string) ([]domain.PaymentInstallment, error) {
+func (r *FinanceInstallmentMongoRepository) FindByParticipantID(ctx context.Context, eventID, participantID string) ([]domain.PaymentInstallment, error) {
 	filter := bson.D{
 		{Key: "event_id", Value: UUIDStringToBinary(eventID)},
 		{Key: "participant_id", Value: UUIDStringToBinary(participantID)},
@@ -216,7 +216,7 @@ func (r *PaymentInstallmentMongoRepository) FindByParticipantID(ctx context.Cont
 }
 
 // FindPendingByEventID returns all PENDING or OVERDUE installments for the given event.
-func (r *PaymentInstallmentMongoRepository) FindPendingByEventID(ctx context.Context, eventID string) ([]domain.PaymentInstallment, error) {
+func (r *FinanceInstallmentMongoRepository) FindPendingByEventID(ctx context.Context, eventID string) ([]domain.PaymentInstallment, error) {
 	filter := bson.D{
 		{Key: "event_id", Value: UUIDStringToBinary(eventID)},
 		{Key: "status", Value: bson.D{{Key: "$in", Value: bson.A{"PENDING", "OVERDUE"}}}},
@@ -241,6 +241,45 @@ func (r *PaymentInstallmentMongoRepository) FindPendingByEventID(ctx context.Con
 // ===================================================================
 // ParticipanteMongoRepository — write-side, implements portout.ParticipanteRepository
 // ===================================================================
+
+// FindParticipationIDsByUserID returns the _id (as UUID strings) of all participation
+// records for the given user.
+func (r *ParticipanteMongoRepository) FindParticipationIDsByUserID(ctx context.Context, userID string) ([]string, error) {
+	cursor, err := r.col.Find(ctx, bson.D{{Key: "usuario_id", Value: userIDValue(userID)}},
+		options.Find().SetProjection(bson.D{{Key: "_id", Value: 1}}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find participation ids by user: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var ids []string
+	for cursor.Next(ctx) {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+		if id := rawIDToString(doc["_id"]); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("cursor participation ids: %w", err)
+	}
+	return ids, nil
+}
+
+// IsParticipantOfEvent reports whether the user has any participation record in the event.
+func (r *ParticipanteMongoRepository) IsParticipantOfEvent(ctx context.Context, eventID, userID string) (bool, error) {
+	count, err := r.col.CountDocuments(ctx, bson.D{
+		{Key: "evento_id", Value: UUIDStringToBinary(eventID)},
+		{Key: "usuario_id", Value: userIDValue(userID)},
+	})
+	if err != nil {
+		return false, fmt.Errorf("is participant of event: %w", err)
+	}
+	return count > 0, nil
+}
 
 // SaveOrganizador creates a participant document for the event creator with
 // papel=ORGANIZADOR and status=CONFIRMADO, matching Java's auto-registration behaviour.

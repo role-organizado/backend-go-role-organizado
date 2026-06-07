@@ -2,7 +2,10 @@ package payment
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
 	portin "github.com/role-organizado/backend-go-role-organizado/internal/port/in"
@@ -190,31 +193,63 @@ func NewUpsertConfigPagamento(r portout.EventoConfigPagamentoRepository) *Upsert
 	return &UpsertConfigPagamento{configs: r}
 }
 
+// buildFeePolicyVersion generates the snapshot version string for an event config.
+// Format matches Java: pricing-policy:{versionId}:{eventId}:{effectiveFrom}.
+// Returns empty string when no fee policy was configured (both percents are 0).
+func buildFeePolicyVersion(eventID string, platformFee, pspFee float64, now time.Time) string {
+	if platformFee == 0 && pspFee == 0 {
+		return ""
+	}
+	return fmt.Sprintf("pricing-policy:%s:%s:%s",
+		uuid.New().String(),
+		eventID,
+		now.UTC().Format(time.RFC3339),
+	)
+}
+
 // Execute creates or updates the payment config for an event.
+// When fee fields are provided (PlatformFeePercent or PspFeePercent non-zero),
+// a FeePolicyVersion snapshot string is generated — mirroring Java
+// AtualizarConfigPagamentoUseCase behaviour.
 func (uc *UpsertConfigPagamento) Execute(ctx context.Context, in portin.UpsertConfigPagamentoInput) (*domain.EventoConfigPagamento, error) {
 	now := time.Now()
+	feeVersion := buildFeePolicyVersion(in.EventoID, in.PlatformFeePercent, in.PspFeePercent, now)
 
 	existing, err := uc.configs.FindByEventoID(ctx, in.EventoID)
 	if err == nil && existing != nil {
-		// update existing
+		// update existing — preserve immutable fields, overwrite mutable ones
 		existing.MetodosPagamento = in.MetodosPagamento
 		existing.PrazoPagamento = in.PrazoPagamento
 		existing.ChavePix = in.ChavePix
 		existing.InstrucoesBoleto = in.InstrucoesBoleto
+		existing.PlatformFeePercent = in.PlatformFeePercent
+		existing.PspFeePercent = in.PspFeePercent
+		existing.PaymentProvider = in.PaymentProvider
+		existing.PaymentFrequency = in.PaymentFrequency
+		existing.PaymentReleaseTrigger = in.PaymentReleaseTrigger
+		if feeVersion != "" {
+			existing.FeePolicyVersion = feeVersion
+		}
 		existing.UpdatedAt = now
 		return uc.configs.Update(ctx, existing)
 	}
 
 	// create new
 	cfg := &domain.EventoConfigPagamento{
-		EventoID:         in.EventoID,
-		UsuarioID:        in.UsuarioID,
-		MetodosPagamento: in.MetodosPagamento,
-		PrazoPagamento:   in.PrazoPagamento,
-		ChavePix:         in.ChavePix,
-		InstrucoesBoleto: in.InstrucoesBoleto,
-		CriadoEm:        now,
-		UpdatedAt:        now,
+		EventoID:              in.EventoID,
+		UsuarioID:             in.UsuarioID,
+		MetodosPagamento:      in.MetodosPagamento,
+		PrazoPagamento:        in.PrazoPagamento,
+		ChavePix:              in.ChavePix,
+		InstrucoesBoleto:      in.InstrucoesBoleto,
+		PlatformFeePercent:    in.PlatformFeePercent,
+		PspFeePercent:         in.PspFeePercent,
+		PaymentProvider:       in.PaymentProvider,
+		PaymentFrequency:      in.PaymentFrequency,
+		PaymentReleaseTrigger: in.PaymentReleaseTrigger,
+		FeePolicyVersion:      feeVersion,
+		CriadoEm:             now,
+		UpdatedAt:             now,
 	}
 	return uc.configs.Save(ctx, cfg)
 }
@@ -236,88 +271,3 @@ func (uc *GetConfigPagamento) Execute(ctx context.Context, eventoID, _ string) (
 	return uc.configs.FindByEventoID(ctx, eventoID)
 }
 
-// ---- ManageSavedCards ----
-
-// ManageSavedCards implements portin.ManageSavedCardsUseCase.
-type ManageSavedCards struct {
-	cards portout.SavedCardRepository
-}
-
-// NewManageSavedCards creates a new ManageSavedCards use case.
-func NewManageSavedCards(cards portout.SavedCardRepository) *ManageSavedCards {
-	return &ManageSavedCards{cards: cards}
-}
-
-// List returns all active saved cards for the user.
-func (uc *ManageSavedCards) List(ctx context.Context, userID string) ([]domain.SavedCard, error) {
-	return uc.cards.FindByUserID(ctx, userID)
-}
-
-// Create saves a new credit card for the user.
-func (uc *ManageSavedCards) Create(ctx context.Context, in portin.CreateSavedCardInput) (*domain.SavedCard, error) {
-	now := time.Now()
-	card := &domain.SavedCard{
-		UserID:      in.UserID,
-		LastFour:    in.LastFour,
-		Brand:       in.Brand,
-		HolderName:  in.HolderName,
-		ExpiryMonth: in.ExpiryMonth,
-		ExpiryYear:  in.ExpiryYear,
-		IsDefault:   in.IsDefault,
-		Active:      true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	return uc.cards.Save(ctx, card)
-}
-
-// Get retrieves a saved card by ID, enforcing ownership.
-func (uc *ManageSavedCards) Get(ctx context.Context, id, userID string) (*domain.SavedCard, error) {
-	return uc.cards.FindByID(ctx, id, userID)
-}
-
-// Delete soft-deletes a saved card, enforcing ownership.
-func (uc *ManageSavedCards) Delete(ctx context.Context, id, userID string) error {
-	return uc.cards.SoftDelete(ctx, id, userID)
-}
-
-// SetDefault designates a saved card as the user's default.
-func (uc *ManageSavedCards) SetDefault(ctx context.Context, id, userID string) error {
-	// Verify ownership first.
-	if _, err := uc.cards.FindByID(ctx, id, userID); err != nil {
-		return err
-	}
-	if err := uc.cards.ClearDefault(ctx, userID); err != nil {
-		return err
-	}
-	card, err := uc.cards.FindByID(ctx, id, userID)
-	if err != nil {
-		return err
-	}
-	card.IsDefault = true
-	card.UpdatedAt = time.Now()
-	_, err = uc.cards.Save(ctx, card)
-	return err
-}
-
-// ---- QueryInstallments ----
-
-// QueryInstallments implements portin.QueryInstallmentsUseCase.
-type QueryInstallments struct {
-	installments portout.InstallmentQueryRepository
-}
-
-// NewQueryInstallments creates a new QueryInstallments use case.
-func NewQueryInstallments(installments portout.InstallmentQueryRepository) *QueryInstallments {
-	return &QueryInstallments{installments: installments}
-}
-
-// Query returns installments filtered by eventID, userID, and/or status.
-func (uc *QueryInstallments) Query(ctx context.Context, in portin.QueryInstallmentsInput) ([]domain.Installment, error) {
-	return uc.installments.FindByFilters(ctx, in.EventID, in.UserID, in.Status)
-}
-
-// GetForUser returns all installments for a user, optionally filtered by status.
-func (uc *QueryInstallments) GetForUser(ctx context.Context, in portin.GetUserInstallmentsInput) ([]domain.Installment, error) {
-	return uc.installments.FindByUserID(ctx, in.UserID, in.Status)
-}

@@ -224,7 +224,7 @@ func (r *LedgerEntryMongoRepository) FindByEventID(
 // UUID Binary (Java) documents.
 // ===================================================================
 
-type paymentAccountDocument struct {
+type financeAccountDocument struct {
 	ID         interface{} `bson:"_id,omitempty"`
 	UserID     bson.Binary `bson:"user_id"`
 	Type       string      `bson:"type"`
@@ -239,8 +239,8 @@ type paymentAccountDocument struct {
 	UpdatedAt  time.Time   `bson:"updated_at"`
 }
 
-func paymentAccountDocFromDomain(a *domain.PaymentAccount) paymentAccountDocument {
-	return paymentAccountDocument{
+func paymentAccountDocFromDomain(a *domain.PaymentAccount) financeAccountDocument {
+	return financeAccountDocument{
 		UserID:     UUIDStringToBinary(a.UserID),
 		Type:       a.Type,
 		PixKey:     a.PixKey,
@@ -255,7 +255,7 @@ func paymentAccountDocFromDomain(a *domain.PaymentAccount) paymentAccountDocumen
 	}
 }
 
-func paymentAccountDocToDomain(doc paymentAccountDocument) *domain.PaymentAccount {
+func paymentAccountDocToDomain(doc financeAccountDocument) *domain.PaymentAccount {
 	return &domain.PaymentAccount{
 		ID:         rawIDToString(doc.ID),
 		UserID:     uuidBinaryToString(doc.UserID),
@@ -274,13 +274,13 @@ func paymentAccountDocToDomain(doc paymentAccountDocument) *domain.PaymentAccoun
 
 // ---- PaymentAccountMongoRepository ----
 
-// PaymentAccountMongoRepository implements portout.PaymentAccountRepository.
+// PaymentAccountMongoRepository implements portout.FinanceAccountRepository.
 type PaymentAccountMongoRepository struct {
 	col *mongo.Collection
 }
 
 // NewPaymentAccountRepository creates a PaymentAccountRepository backed by MongoDB.
-func NewPaymentAccountRepository(client *Client) portout.PaymentAccountRepository {
+func NewFinanceAccountRepository(client *Client) portout.FinanceAccountRepository {
 	return &PaymentAccountMongoRepository{col: client.Collection("payment_accounts")}
 }
 
@@ -299,7 +299,7 @@ func (r *PaymentAccountMongoRepository) FindByUserID(ctx context.Context, userID
 
 	var result []domain.PaymentAccount
 	for cur.Next(ctx) {
-		var doc paymentAccountDocument
+		var doc financeAccountDocument
 		if err := cur.Decode(&doc); err != nil {
 			return nil, apierr.Internal(err.Error())
 		}
@@ -317,7 +317,7 @@ func (r *PaymentAccountMongoRepository) FindByID(ctx context.Context, id, userID
 	filter := parseIDToFilter(id)
 	filter = append(filter, bson.E{Key: "user_id", Value: UUIDStringToBinary(userID)})
 
-	var doc paymentAccountDocument
+	var doc financeAccountDocument
 	if err := r.col.FindOne(ctx, filter).Decode(&doc); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, apierr.NotFound("payment_account", id)
