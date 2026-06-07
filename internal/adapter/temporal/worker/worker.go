@@ -35,6 +35,13 @@ func (r *Registry) RegisterReconciliationWorker(acts *temporalactivity.PaymentAc
 	w.RegisterActivity(acts)
 }
 
+// RegisterSandboxWorker registers the SandboxWorkflow POC on SANDBOX_QUEUE.
+func (r *Registry) RegisterSandboxWorker(act *temporalactivity.SandboxActivity) {
+	w := r.NewWorker("SANDBOX_QUEUE", sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.SandboxWorkflow)
+	w.RegisterActivity(act)
+}
+
 // FinanceReconciliationQueue is the Temporal task queue for finance reconciliation workers.
 const FinanceReconciliationQueue = "FINANCE_RECONCILIATION_QUEUE"
 
