@@ -37,6 +37,7 @@ func financeSummaryDocFromDomain(s *domain.FinanceSummary) financeSummaryDocumen
 		Collected:              s.Collected,
 		ProgressPercentage:     s.ProgressPercentage,
 		AvailableForWithdrawal: s.AvailableForWithdrawal,
+		PendingWithdrawals:     s.PendingWithdrawals,
 		LastCalculatedAt:       s.LastCalculatedAt,
 	}
 }
@@ -49,6 +50,7 @@ func financeSummaryDocToDomain(doc financeSummaryDocument) *domain.FinanceSummar
 		Collected:              doc.Collected,
 		ProgressPercentage:     doc.ProgressPercentage,
 		AvailableForWithdrawal: doc.AvailableForWithdrawal,
+		PendingWithdrawals:     doc.PendingWithdrawals,
 		LastCalculatedAt:       doc.LastCalculatedAt,
 	}
 }

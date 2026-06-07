@@ -15,7 +15,30 @@ type FinanceSummary struct {
 	Collected              int64   // centavos
 	ProgressPercentage     float64 // 4 casas, HALF_UP
 	AvailableForWithdrawal int64
+	PendingWithdrawals     int64
 	LastCalculatedAt       time.Time
+}
+
+// Participant represents a user's participation in an event.
+type Participant struct {
+	ID      string
+	EventID string
+	UserID  string
+	Name    string
+	Email   string
+	// Status: ORGANIZACAO | AGUARDANDO_ACEITE | ATIVO | INATIVO
+	Status string
+}
+
+// PaymentInstallment represents a single payment installment for an event participant.
+type PaymentInstallment struct {
+	ID            string
+	EventID       string
+	ParticipantID string
+	Amount        int64  // centavos
+	Status        string // PAID | PENDING | OVERDUE
+	PaymentMethod string // PIX | BOLETO | CREDIT_CARD
+	PaidAt        *time.Time
 }
 
 // LedgerEntry represents a single financial transaction in the event ledger.
