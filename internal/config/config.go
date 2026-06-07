@@ -178,8 +178,10 @@ func Load() (*AppConfig, error) {
 			QueueURL: v.GetString("sqs.queue_url"),
 		},
 		Asaas: AsaasConfig{
-			BaseURL: v.GetString("asaas.base_url"),
-			APIKey:  v.GetString("asaas.api_key"),
+			BaseURL:      v.GetString("asaas.base_url"),
+			APIKey:       v.GetString("asaas.api_key"),
+			WebhookToken: v.GetString("asaas.webhook_token"),
+			UseMock:      v.GetBool("asaas.use_mock"),
 		},
 	}
 
@@ -219,6 +221,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("sqs.region", "us-east-1")
 
 	v.SetDefault("asaas.base_url", "https://sandbox.asaas.com/api/v3")
+	// UseMock defaults to true so local dev never calls the real Asaas API.
+	// Override with ROLE_ASAAS_USE_MOCK=false (or PAYMENT_USE_MOCK=false via BindEnv).
+	v.SetDefault("asaas.use_mock", true)
+	// Support the legacy env-var name used in some Java deployments.
+	_ = v.BindEnv("asaas.use_mock", "PAYMENT_USE_MOCK")
 }
 
 func (c *AppConfig) validate() error {
