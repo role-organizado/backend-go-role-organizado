@@ -56,6 +56,8 @@ import (
 	uclistapresentes "github.com/role-organizado/backend-go-role-organizado/internal/usecase/listapresentes"
 	// Social Features
 	ucsocial "github.com/role-organizado/backend-go-role-organizado/internal/usecase/social"
+	// Pricing — PSP cost review
+	ucpricing "github.com/role-organizado/backend-go-role-organizado/internal/usecase/pricing"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -450,6 +452,10 @@ func main() {
 		temporalRegistry.RegisterReconciliationWorker(paymentActs)
 		temporalRegistry.RegisterSandboxWorker(temporalactivity.NewSandboxActivity())
 
+		pspReviewUC := ucpricing.NewRunPspCostReview(cfg, &http.Client{Timeout: 5 * time.Minute})
+		pspReviewActivity := temporalactivity.NewPricingPspReviewActivity(pspReviewUC)
+		temporalRegistry.RegisterPricingPspReviewWorker(pspReviewActivity)
+
 		findMarkUC := ucpayment.NewFindAndMarkOverdueInstallments()
 		dispatchUC := ucnotification.NewDispatchOverdueNotifications()
 		overdueActs := temporalactivity.NewOverdueInstallmentActivities(findMarkUC, dispatchUC)
@@ -463,6 +469,9 @@ func main() {
 
 		schedCtx, schedCancel := context.WithTimeout(ctx, 15*time.Second)
 		defer schedCancel()
+		if schedErr := temporalRegistry.InitPricingPspReviewSchedule(schedCtx); schedErr != nil {
+			slog.Warn("temporal: failed to init pricing-psp-review schedule", "error", schedErr)
+		}
 		if schedErr := temporalworker.InitOverdueInstallmentSchedule(schedCtx, temporalClient); schedErr != nil {
 			slog.Warn("overdue-installment schedule init failed", "error", schedErr)
 		}

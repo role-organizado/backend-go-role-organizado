@@ -150,7 +150,8 @@ const (
 
 	// ReconciliationTaskQueue is the Temporal task queue for reconciliation workflows.
 	ReconciliationTaskQueue = "reconciliation-queue"
-// Package workflow contains Temporal workflow definitions and ID generators.
-// OverdueInstallmentPrimaryID returns the workflow ID for a manual run scoped to a reference date.
-// Format: overdue-installment-real-{referenceDate}
+// Package workflow contains Temporal workflow definitions and ID helpers.
+// PricingPspReviewPrimaryID returns the deterministic workflow ID for a
+// manual/triggered PricingPspReview run, scoped to a specific reference date.
+// Example: pricing-psp-review-real-2026-06-06
 )
