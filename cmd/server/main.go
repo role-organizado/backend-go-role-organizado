@@ -42,6 +42,8 @@ import (
 	ucasaas "github.com/role-organizado/backend-go-role-organizado/internal/infra/asaas"
 	paymentdomain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
 	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
+	// Phase 5b: Finance hexagonal
+	ucfinance "github.com/role-organizado/backend-go-role-organizado/internal/usecase/finance"
 	// Phase 6
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
 	// Phase 6b: Notification Templates
@@ -481,8 +483,31 @@ func main() {
 
 	paymentMethodsHandler := handler.NewPaymentMethodsHandler(manageAccountsUC, validatePixUC, manageSavedCardsUC)
 
-	// --- Finance, Admin, Participantes handlers (direct MongoDB) ---
-	financeHandler := handler.NewFinanceHandler(mongoClient)
+	// --- Finance domain (hexagonal — zero direct Mongo in handler) ---
+	financeSummaryRepo := mongodb.NewFinanceSummaryRepository(mongoClient)
+	ledgerEntryRepo := mongodb.NewLedgerEntryRepository(mongoClient)
+	auditTrailRepo := mongodb.NewAuditTrailRepository(mongoClient)
+	participantRepo := mongodb.NewParticipantRepository(mongoClient)
+	financeInstallmentRepo := mongodb.NewFinanceInstallmentRepository(mongoClient)
+	financeAccountRepo := mongodb.NewFinanceAccountRepository(mongoClient)
+
+	listEventsUC := ucfinance.NewListFinanceEvents(participantRepo, eventoRepo, rateioRepo, financeSummaryRepo)
+	overviewUC := ucfinance.NewGetFinanceOverview(eventoRepo, participantRepo, rateioRepo, financeSummaryRepo)
+	ledgerUC := ucfinance.NewGetLedgerStatement(ledgerEntryRepo, participantRepo)
+	participantsStatusUC := ucfinance.NewGetParticipantsStatus(participantRepo, financeInstallmentRepo)
+	recalculateUC := ucfinance.NewRecalculateFinanceSummary(financeSummaryRepo, rateioRepo, financeInstallmentRepo)
+	sendRemindersUC := ucfinance.NewSendPaymentReminders(participantRepo, financeInstallmentRepo, nil)
+	holdBalanceUC := ucfinance.NewCalculateHoldBalance(financeInstallmentRepo, configSistemaRepo)
+	paymentStatusUC := ucfinance.NewGetEventPaymentStatus(financeInstallmentRepo, participantRepo)
+	paymentAccountsUC := ucfinance.NewManagePaymentAccounts(financeAccountRepo)
+	auditTrailUC := ucfinance.NewGetAuditTrail(auditTrailRepo)
+
+	financeHandler := handler.NewFinanceHandler(
+		listEventsUC, overviewUC, ledgerUC, participantsStatusUC, recalculateUC,
+		sendRemindersUC, holdBalanceUC, paymentStatusUC, paymentAccountsUC, auditTrailUC,
+	)
+
+	// --- Admin, Participantes handlers (direct MongoDB) ---
 	adminHandler := handler.NewAdminHandler(mongoClient)
 	participantesHandler := handler.NewParticipantesHandler(mongoClient)
 	usuariosEventoHandler := handler.NewUsuariosEventoHandler(mongoClient)

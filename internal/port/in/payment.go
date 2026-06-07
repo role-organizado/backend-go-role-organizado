@@ -7,6 +7,39 @@ import (
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
 )
 
+// ---- SavedCard input types ----
+
+// CreateSavedCardInput holds data to create a new saved credit card.
+type CreateSavedCardInput struct {
+	UserID      string
+	LastFour    string
+	Brand       string
+	HolderName  string
+	ExpiryMonth int
+	ExpiryYear  int
+	IsDefault   bool
+}
+
+// QueryInstallmentsInput holds filter params for querying installments.
+type QueryInstallmentsInput struct {
+	EventID string // optional
+	UserID  string // optional
+	Status  string // optional
+}
+
+// GetUserInstallmentsInput holds params for getting a user's own installments.
+type GetUserInstallmentsInput struct {
+	UserID string
+	Status string // optional
+}
+
+
+// QueryInstallmentsUseCase handles installment query endpoints.
+type QueryInstallmentsUseCase interface {
+	Query(ctx context.Context, in QueryInstallmentsInput) ([]domain.Installment, error)
+	GetForUser(ctx context.Context, in GetUserInstallmentsInput) ([]domain.Installment, error)
+}
+
 // CreatePagamentoInput contains fields to create a new recurring payment.
 type CreatePagamentoInput struct {
 	EventoID        string

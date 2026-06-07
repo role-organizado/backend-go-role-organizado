@@ -53,9 +53,9 @@ func bsonDateToISO(v interface{}) interface{} {
 // matching Java's ParticipantResponse record exactly (camelCase fields, UUID strings, ISO dates).
 func participantDocToResponse(doc bson.M) map[string]interface{} {
 	return map[string]interface{}{
-		"id":                    binaryToUUIDString(doc["_id"]),
-		"eventoId":              binaryToUUIDString(doc["evento_id"]),
-		"usuarioId":             binaryToUUIDString(doc["usuario_id"]),
+		"id":                    mongodb.BinaryToUUIDString(doc["_id"]),
+		"eventoId":              mongodb.BinaryToUUIDString(doc["evento_id"]),
+		"usuarioId":             mongodb.BinaryToUUIDString(doc["usuario_id"]),
 		"tipoParticipante":      doc["tipo_participante"],
 		"papel":                 doc["papel"],
 		"status":                doc["status"],
@@ -83,7 +83,7 @@ func (h *UsuariosEventoHandler) GetByUsuario(w http.ResponseWriter, r *http.Requ
 
 	col := h.mongo.Collection("participants")
 	cursor, err := col.Find(ctx,
-		bson.M{"usuario_id": uuidStringToBinary(usuarioId)},
+		bson.M{"usuario_id": mongodb.UUIDStringToBinary(usuarioId)},
 		options.Find().SetSort(bson.D{{Key: "criado_em", Value: -1}}),
 	)
 	if err != nil {
@@ -119,7 +119,7 @@ func (h *UsuariosEventoHandler) GetByEvento(w http.ResponseWriter, r *http.Reque
 
 	col := h.mongo.Collection("participants")
 	cursor, err := col.Find(ctx,
-		bson.M{"evento_id": uuidStringToBinary(eventoId)},
+		bson.M{"evento_id": mongodb.UUIDStringToBinary(eventoId)},
 		options.Find().SetSort(bson.D{{Key: "criado_em", Value: -1}}),
 	)
 	if err != nil {
@@ -155,7 +155,7 @@ func (h *UsuariosEventoHandler) GetByID(w http.ResponseWriter, r *http.Request) 
 
 	col := h.mongo.Collection("participants")
 	var doc bson.M
-	err := col.FindOne(ctx, bson.M{"_id": uuidStringToBinary(id)}).Decode(&doc)
+	err := col.FindOne(ctx, bson.M{"_id": mongodb.UUIDStringToBinary(id)}).Decode(&doc)
 	if err != nil {
 		writeError(w, apierr.NotFoundMsg("participante não encontrado"))
 		return
@@ -187,7 +187,7 @@ func (h *UsuariosEventoHandler) GetParticipantsSummary(w http.ResponseWriter, r 
 	// 1. Find confirmed participants for the event
 	partCol := h.mongo.Collection("participants")
 	partCursor, err := partCol.Find(ctx, bson.M{
-		"evento_id": uuidStringToBinary(eventoId),
+		"evento_id": mongodb.UUIDStringToBinary(eventoId),
 		"status":    bson.M{"$in": bson.A{"CONFIRMADO", "ATIVO"}},
 	})
 	if err != nil {
@@ -205,9 +205,9 @@ func (h *UsuariosEventoHandler) GetParticipantsSummary(w http.ResponseWriter, r 
 	// 2. Collect unique user IDs to batch-fetch names
 	userIDs := make([]any, 0, len(participants))
 	for _, p := range participants {
-		uid := binaryToUUIDString(p["usuario_id"])
+		uid := mongodb.BinaryToUUIDString(p["usuario_id"])
 		if uid != "" {
-			userIDs = append(userIDs, uuidStringToBinary(uid))
+			userIDs = append(userIDs, mongodb.UUIDStringToBinary(uid))
 		}
 	}
 
@@ -224,7 +224,7 @@ func (h *UsuariosEventoHandler) GetParticipantsSummary(w http.ResponseWriter, r 
 			var users []bson.M
 			if uCursor.All(ctx, &users) == nil {
 				for _, u := range users {
-					uid := binaryToUUIDString(u["_id"])
+					uid := mongodb.BinaryToUUIDString(u["_id"])
 					if nome, ok := u["nome"].(string); ok && uid != "" {
 						userNames[uid] = nome
 					}
@@ -237,7 +237,7 @@ func (h *UsuariosEventoHandler) GetParticipantsSummary(w http.ResponseWriter, r 
 	installmentsMap := make(map[string][]bson.M)
 	instCol := h.mongo.Collection("payment_installments")
 	instCursor, instErr := instCol.Find(ctx, bson.M{
-		"event_id": uuidStringToBinary(eventoId),
+		"event_id": mongodb.UUIDStringToBinary(eventoId),
 	})
 	if instErr == nil {
 		defer instCursor.Close(ctx)
@@ -245,7 +245,7 @@ func (h *UsuariosEventoHandler) GetParticipantsSummary(w http.ResponseWriter, r 
 		if instCursor.All(ctx, &installments) == nil {
 			for _, inst := range installments {
 				// Java uses participant_id to group (UUID string key)
-				pid := binaryToUUIDString(inst["participant_id"])
+				pid := mongodb.BinaryToUUIDString(inst["participant_id"])
 				if pid != "" {
 					installmentsMap[pid] = append(installmentsMap[pid], inst)
 				}
@@ -256,8 +256,8 @@ func (h *UsuariosEventoHandler) GetParticipantsSummary(w http.ResponseWriter, r 
 	// 5. Build response
 	results := make([]participantSummaryDTO, 0, len(participants))
 	for _, p := range participants {
-		uid := binaryToUUIDString(p["usuario_id"])
-		pid := binaryToUUIDString(p["_id"])
+		uid := mongodb.BinaryToUUIDString(p["usuario_id"])
+		pid := mongodb.BinaryToUUIDString(p["_id"])
 		userName := userNames[uid]
 		if userName == "" {
 			userName = "Unknown"

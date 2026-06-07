@@ -270,3 +270,4 @@ func NewGetConfigPagamento(r portout.EventoConfigPagamentoRepository) *GetConfig
 func (uc *GetConfigPagamento) Execute(ctx context.Context, eventoID, _ string) (*domain.EventoConfigPagamento, error) {
 	return uc.configs.FindByEventoID(ctx, eventoID)
 }
+

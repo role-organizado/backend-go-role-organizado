@@ -6,6 +6,26 @@ import (
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
 )
 
+// SavedCardRepository defines persistence operations for saved credit cards.
+type SavedCardRepository interface {
+	FindByUserID(ctx context.Context, userID string) ([]domain.SavedCard, error)
+	FindByID(ctx context.Context, id, userID string) (*domain.SavedCard, error)
+	Save(ctx context.Context, card *domain.SavedCard) (*domain.SavedCard, error)
+	// ClearDefault removes the is_default flag from all cards belonging to userID.
+	ClearDefault(ctx context.Context, userID string) error
+	// SoftDelete marks a saved card as inactive (active=false).
+	SoftDelete(ctx context.Context, id, userID string) error
+}
+
+// InstallmentQueryRepository defines query operations for payment installments
+// used by the payment handler endpoints.
+type InstallmentQueryRepository interface {
+	// FindByFilters queries installments by optional eventID, userID, and status.
+	FindByFilters(ctx context.Context, eventID, userID, status string) ([]domain.Installment, error)
+	// FindByUserID returns all installments for a user, optionally filtered by status.
+	FindByUserID(ctx context.Context, userID, status string) ([]domain.Installment, error)
+}
+
 // PagamentoMensalRepository is the persistence contract for recurring payments.
 type PagamentoMensalRepository interface {
 	FindByID(ctx context.Context, id string) (*domain.PagamentoMensal, error)

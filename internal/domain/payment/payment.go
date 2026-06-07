@@ -2,6 +2,34 @@ package payment
 
 import "time"
 
+// SavedCard represents a user's saved credit card for payment.
+type SavedCard struct {
+	ID          string
+	UserID      string
+	LastFour    string
+	Brand       string
+	HolderName  string
+	ExpiryMonth int
+	ExpiryYear  int
+	IsDefault   bool
+	Active      bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// Installment represents a payment installment for an event participant.
+type Installment struct {
+	ID            string
+	EventID       string
+	UserID        string
+	ParticipantID string
+	Amount        int64
+	Status        string
+	PaymentMethod string
+	DueDate       time.Time
+	PaidAt        *time.Time
+}
+
 // MetodoPagamento represents supported payment methods.
 type MetodoPagamento string
 
