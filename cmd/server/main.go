@@ -21,6 +21,7 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/handler"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
+	temporalworker "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/worker"
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
 	"github.com/role-organizado/backend-go-role-organizado/migrations"
 	pkgjwt "github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
@@ -305,6 +306,24 @@ func main() {
 	removeItemUC := uclistapresentes.NewRemoveItem(listaPresentesRepo)
 	listaPresentesHandler := handler.NewListaPresentesHandler(addItemUC, getItemUC, listItemsUC, reservarItemUC, removeItemUC)
 
+	// --- Onda 1: Temporal workers (FinanceReconciliation) ---
+	// Non-fatal: HTTP serving continues even if Temporal is unreachable at startup.
+	var temporalRegistry *temporalworker.Registry
+	if tr, trErr := temporalworker.New(*cfg); trErr != nil {
+		slog.Warn("temporal client init failed, workers disabled", "error", trErr)
+	} else {
+		tr.RegisterFinanceReconciliation()
+		if startErr := tr.Start(); startErr != nil {
+			slog.Warn("temporal workers failed to start", "error", startErr)
+			tr.Stop()
+		} else {
+			temporalRegistry = tr
+			if schedErr := temporalworker.InitFinanceReconciliationSchedule(ctx, tr.Client()); schedErr != nil {
+				slog.Warn("finance reconciliation schedule init failed", "error", schedErr)
+			}
+		}
+	}
+
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
@@ -392,6 +411,10 @@ func main() {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server forced to shutdown", "error", err)
+	}
+
+	if temporalRegistry != nil {
+		temporalRegistry.Stop()
 	}
 
 	if err := mongoClient.Disconnect(shutdownCtx); err != nil {
