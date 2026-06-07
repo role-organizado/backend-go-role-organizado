@@ -44,25 +44,6 @@ func parseUserIDToBSON(id string) interface{} {
 	return id
 }
 
-// uuidStringToBinary parses a UUID string (8-4-4-4-12) into a bson.Binary subtype 4.
-// Falls back to random UUID if parsing fails.
-func uuidStringToBinary(s string) bson.Binary {
-	u, err := uuid.Parse(s)
-	if err != nil {
-		u = uuid.New()
-	}
-	b := [16]byte(u)
-	return bson.Binary{Subtype: 0x04, Data: b[:]}
-}
-
-// uuidBinaryToString converts a bson.Binary (subtype 3 or 4) to a UUID string.
-func uuidBinaryToString(b bson.Binary) string {
-	if len(b.Data) != 16 {
-		return ""
-	}
-	return uuid.UUID(b.Data).String()
-}
-
 // RefreshTokenRepository implements portout.RefreshTokenRepository using MongoDB.
 type RefreshTokenRepository struct {
 	col *mongo.Collection

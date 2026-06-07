@@ -7,24 +7,61 @@ import (
 
 	"go.temporal.io/sdk/client"
 
-	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
+	temporalworkflow "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
 )
 
-// Schedule constants for the overdue-installment daily job.
 const (
-	// OverdueInstallmentScheduleID is the stable schedule identifier in Temporal.
 	OverdueInstallmentScheduleID = "overdue-installment-daily-workflow"
-
-	// overdueInstallmentCron fires at 06:00 UTC = 03:00 BRT (America/Sao_Paulo).
-	overdueInstallmentCron = "0 6 * * *"
+	overdueInstallmentCron       = "0 6 * * *"
 )
 
-// InitOverdueInstallmentSchedule creates the daily schedule if it does not already exist.
-// Idempotent: safely called on every startup.
+// ScheduleInitializer creates and upserts Temporal Schedules for periodic workflows.
+// It mirrors the Java TemporalScheduleInitializer / app.temporal.schedules configuration.
+type ScheduleInitializer struct {
+	client client.Client
+}
+
+// NewScheduleInitializer creates a new ScheduleInitializer backed by a Temporal client.
+func NewScheduleInitializer(c client.Client) *ScheduleInitializer {
+	return &ScheduleInitializer{client: c}
+}
+
+// InitializeReconciliationSchedule creates or updates the daily PSP reconciliation
+// Temporal Schedule. The schedule triggers ReconciliationWorkflow every day at 06:00.
+func (si *ScheduleInitializer) InitializeReconciliationSchedule(ctx context.Context) error {
+	scheduleID := temporalworkflow.PspReconciliationScheduledID
+
+	handle := si.client.ScheduleClient().GetHandle(ctx, scheduleID)
+	_, descErr := handle.Describe(ctx)
+	if descErr == nil {
+		slog.InfoContext(ctx, "temporal: reconciliation schedule already exists, skipping upsert",
+			"scheduleID", scheduleID)
+		return nil
+	}
+
+	_, err := si.client.ScheduleClient().Create(ctx, client.ScheduleOptions{
+		ID: scheduleID,
+		Spec: client.ScheduleSpec{
+			CronExpressions: []string{"0 6 * * *"},
+		},
+		Action: &client.ScheduleWorkflowAction{
+			Workflow:  temporalworkflow.ReconciliationWorkflow,
+			TaskQueue: temporalworkflow.ReconciliationTaskQueue,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("temporal: create reconciliation schedule: %w", err)
+	}
+
+	slog.InfoContext(ctx, "temporal: reconciliation schedule created", "scheduleID", scheduleID)
+	return nil
+}
+
+// InitOverdueInstallmentSchedule creates the daily overdue installment schedule.
+// Fires at 06:00 UTC (03:00 BRT). Idempotent — skips if already exists.
 func InitOverdueInstallmentSchedule(ctx context.Context, c client.Client) error {
 	scheduleClient := c.ScheduleClient()
 
-	// Check for idempotency: if the schedule already exists, Describe returns nil error.
 	handle := scheduleClient.GetHandle(ctx, OverdueInstallmentScheduleID)
 	if _, err := handle.Describe(ctx); err == nil {
 		slog.InfoContext(ctx, "overdue installment schedule already exists",
@@ -38,7 +75,7 @@ func InitOverdueInstallmentSchedule(ctx context.Context, c client.Client) error 
 			CronExpressions: []string{overdueInstallmentCron},
 		},
 		Action: &client.ScheduleWorkflowAction{
-			Workflow:  workflow.OverdueInstallmentWorkflow,
+			Workflow:  temporalworkflow.OverdueInstallmentWorkflow,
 			TaskQueue: OverdueInstallmentQueue,
 		},
 	})
