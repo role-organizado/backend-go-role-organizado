@@ -89,6 +89,13 @@ type SQSConfig struct {
 type AsaasConfig struct {
 	BaseURL string
 	APIKey  string
+	// WebhookToken is the secret used to validate incoming Asaas webhook calls.
+	// Set via ROLE_ASAAS_WEBHOOK_TOKEN.
+	WebhookToken string
+	// UseMock controls whether to use the in-memory MockProvider instead of the real
+	// Asaas HTTP client. Defaults to true so local dev never calls the real API.
+	// Set via ROLE_ASAAS_USE_MOCK.
+	UseMock bool
 }
 
 // loadDotEnv reads a .env file and injects each ROLE_* variable into the process
