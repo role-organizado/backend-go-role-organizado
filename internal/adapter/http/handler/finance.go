@@ -2,12 +2,9 @@ package handler
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,37 +15,6 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
 	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
-
-// binaryToUUIDString converts a MongoDB Binary (subtype 4, UUID) to a UUID string.
-// Java stores UUIDs as Binary subtype 4 (16 bytes). Go's bson.M decodes them as bson.Binary.
-func binaryToUUIDString(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	switch val := v.(type) {
-	case bson.Binary:
-		if len(val.Data) == 16 {
-			b := val.Data
-			return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-				b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
-		}
-	case string:
-		return val
-	}
-	return fmt.Sprintf("%v", v)
-}
-
-// uuidStringToBinary converts a UUID string (8-4-4-4-12) to a MongoDB Binary (subtype 4).
-func uuidStringToBinary(id string) bson.Binary {
-	parts := strings.Split(id, "-")
-	if len(parts) == 5 {
-		hexStr := strings.Join(parts, "")
-		if b, err := hex.DecodeString(hexStr); err == nil && len(b) == 16 {
-			return bson.Binary{Subtype: 0x04, Data: b}
-		}
-	}
-	return bson.Binary{Data: []byte(id)}
-}
 
 // financeEventResponse is the FinanceEvent shape expected by the frontend.
 type financeEventResponse struct {
@@ -128,7 +94,7 @@ func (h *FinanceHandler) ListFinanceEvents(w http.ResponseWriter, r *http.Reques
 	// Build a set of event IDs to look up event names/dates
 	eventIDs := make([]string, 0, len(rawSummaries))
 	for _, s := range rawSummaries {
-		eventID := binaryToUUIDString(s["event_id"])
+		eventID := mongodb.BinaryToUUIDString(s["event_id"])
 		if eventID != "" {
 			eventIDs = append(eventIDs, eventID)
 		}
@@ -141,7 +107,7 @@ func (h *FinanceHandler) ListFinanceEvents(w http.ResponseWriter, r *http.Reques
 		evCol := h.mongo.Collection("eventos")
 		idList := make(bson.A, len(eventIDs))
 		for i, id := range eventIDs {
-			idList[i] = uuidStringToBinary(id)
+			idList[i] = mongodb.UUIDStringToBinary(id)
 		}
 		evCursor, evErr := evCol.Find(ctx, bson.M{"_id": bson.M{"$in": idList}}, options.Find().SetProjection(bson.M{"_id": 1, "nome": 1, "data": 1, "data_inicio": 1}))
 		if evErr == nil {
@@ -150,7 +116,7 @@ func (h *FinanceHandler) ListFinanceEvents(w http.ResponseWriter, r *http.Reques
 			if evCursor.All(ctx, &evDocs) == nil {
 				for _, ev := range evDocs {
 					// _id is bson.Binary — convert back to UUID string for map key
-					idStr := binaryToUUIDString(ev["_id"])
+					idStr := mongodb.BinaryToUUIDString(ev["_id"])
 					if idStr != "" {
 						eventMap[idStr] = ev
 					}
@@ -161,7 +127,7 @@ func (h *FinanceHandler) ListFinanceEvents(w http.ResponseWriter, r *http.Reques
 
 	response := make([]financeEventResponse, 0, len(rawSummaries))
 	for _, s := range rawSummaries {
-		eventID := binaryToUUIDString(s["event_id"])
+		eventID := mongodb.BinaryToUUIDString(s["event_id"])
 
 		eventName := ""
 		eventDate := ""
@@ -180,8 +146,8 @@ func (h *FinanceHandler) ListFinanceEvents(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		goal := toInt64(s["total_goal"])
-		collected := toInt64(s["total_collected"])
+		goal := mongodb.ToInt64(s["total_goal"])
+		collected := mongodb.ToInt64(s["total_collected"])
 		progress := 0.0
 		if goal > 0 {
 			progress = float64(collected) / float64(goal) * 100
@@ -194,29 +160,11 @@ func (h *FinanceHandler) ListFinanceEvents(w http.ResponseWriter, r *http.Reques
 			Goal:               goal,
 			Collected:          collected,
 			ProgressPercentage: progress,
-			PendingWithdrawals: toInt64(s["pending_withdrawals"]),
+			PendingWithdrawals: mongodb.ToInt64(s["pending_withdrawals"]),
 		})
 	}
 
 	writeJSON(w, http.StatusOK, response)
-}
-
-// toInt64 safely converts various numeric BSON types to int64.
-func toInt64(v interface{}) int64 {
-	if v == nil {
-		return 0
-	}
-	switch n := v.(type) {
-	case int64:
-		return n
-	case int32:
-		return int64(n)
-	case int:
-		return int64(n)
-	case float64:
-		return int64(n)
-	}
-	return 0
 }
 
 func (h *FinanceHandler) GetFinanceOverview(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +263,7 @@ func (h *FinanceHandler) CreatePaymentAccount(w http.ResponseWriter, r *http.Req
 
 	now := time.Now().UTC()
 	doc := bson.M{
-		"_id":                 generateID(),
+		"_id":                 mongodb.GenerateID(),
 		"user_id":             userID,
 		"account_type":        req["accountType"],
 		"pix_key_type":        req["pixKeyType"],
@@ -464,7 +412,7 @@ func (h *FinanceHandler) CreateSavedCard(w http.ResponseWriter, r *http.Request)
 
 	now := time.Now().UTC()
 	doc := bson.M{
-		"_id":           generateID(),
+		"_id":           mongodb.GenerateID(),
 		"user_id":       userID,
 		"active":        true,
 		"is_default":    req["isDefault"] == true,
@@ -472,7 +420,7 @@ func (h *FinanceHandler) CreateSavedCard(w http.ResponseWriter, r *http.Request)
 		"atualizado_em": now,
 	}
 	for k, v := range req {
-		doc[camelToSnake(k)] = v
+		doc[mongodb.CamelToSnake(k)] = v
 	}
 
 	col := h.mongo.Collection("saved_credit_cards")
@@ -599,24 +547,3 @@ func (h *FinanceHandler) GetUserInstallments(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, results)
 }
 
-// ---- helpers ----
-
-func generateID() string {
-	return bson.NewObjectID().Hex()
-}
-
-// camelToSnake converts camelCase to snake_case for MongoDB storage.
-func camelToSnake(s string) string {
-	var result []byte
-	for i, c := range s {
-		if c >= 'A' && c <= 'Z' && i > 0 {
-			result = append(result, '_')
-		}
-		if c >= 'A' && c <= 'Z' {
-			result = append(result, byte(c+32))
-		} else {
-			result = append(result, byte(c))
-		}
-	}
-	return string(result)
-}

@@ -31,7 +31,7 @@ func (r *ParticipanteMongoRepository) SaveOrganizador(ctx context.Context, event
 	now := time.Now().UTC()
 	doc := bson.D{
 		{Key: "_id", Value: docID},
-		{Key: "evento_id", Value: uuidStringToBinary(eventoID)}, // eventoID is always UUID format from event Save
+		{Key: "evento_id", Value: UUIDStringToBinary(eventoID)}, // eventoID is always UUID format from event Save
 		{Key: "usuario_id", Value: userIDValue(usuarioID)},
 		{Key: "papel", Value: "ORGANIZADOR"},
 		{Key: "status", Value: "CONFIRMADO"},
