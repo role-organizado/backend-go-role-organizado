@@ -15,6 +15,9 @@ const (
 	PricingPspReviewScheduleID = "pricing-psp-review-daily-workflow"
 	pricingPspReviewTaskQueue  = "PRICING_PSP_REVIEW_QUEUE"
 	pricingPspReviewCron       = "30 5 * * *"
+
+	OverdueInstallmentScheduleID = "overdue-installment-daily-workflow"
+	overdueInstallmentCron       = "0 6 * * *"
 )
 
 // ScheduleInitializer creates and upserts Temporal Schedules for periodic workflows.
@@ -120,6 +123,39 @@ func InitFinanceReconciliationSchedule(ctx context.Context, c client.Client) err
 		"scheduleID", scheduleID,
 		"cron", "0 5 * * *",
 		"queue", FinanceReconciliationQueue,
+	)
+	return nil
+}
+
+// InitOverdueInstallmentSchedule creates the daily overdue installment schedule.
+// Fires at 06:00 UTC (03:00 BRT). Idempotent — skips if already exists.
+func InitOverdueInstallmentSchedule(ctx context.Context, c client.Client) error {
+	scheduleClient := c.ScheduleClient()
+
+	handle := scheduleClient.GetHandle(ctx, OverdueInstallmentScheduleID)
+	if _, err := handle.Describe(ctx); err == nil {
+		slog.InfoContext(ctx, "overdue installment schedule already exists",
+			"scheduleID", OverdueInstallmentScheduleID)
+		return nil
+	}
+
+	_, err := scheduleClient.Create(ctx, client.ScheduleOptions{
+		ID: OverdueInstallmentScheduleID,
+		Spec: client.ScheduleSpec{
+			CronExpressions: []string{overdueInstallmentCron},
+		},
+		Action: &client.ScheduleWorkflowAction{
+			Workflow:  temporalworkflow.OverdueInstallmentWorkflow,
+			TaskQueue: OverdueInstallmentQueue,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("creating overdue installment schedule: %w", err)
+	}
+
+	slog.InfoContext(ctx, "overdue installment schedule created",
+		"scheduleID", OverdueInstallmentScheduleID,
+		"cron", overdueInstallmentCron,
 	)
 	return nil
 }

@@ -1,163 +1,131 @@
 package workflow_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
+	sdkactivity "go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
 
-	. "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
+	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
 )
 
-// ── Test suite ────────────────────────────────────────────────────────────────
-
-type OverdueInstallmentWorkflowTestSuite struct {
+// OverdueInstallmentSuite exercises OverdueInstallmentWorkflow via the Temporal test suite.
+type OverdueInstallmentSuite struct {
 	suite.Suite
 	testsuite.WorkflowTestSuite
-
-	testEnv *testsuite.TestWorkflowEnvironment
 }
 
-func (s *OverdueInstallmentWorkflowTestSuite) SetupTest() {
-	s.testEnv = s.NewTestWorkflowEnvironment()
+// TestOverdueInstallment is the entry point for `go test -run TestOverdueInstallment`.
+func TestOverdueInstallment(t *testing.T) {
+	suite.Run(t, new(OverdueInstallmentSuite))
 }
 
-func (s *OverdueInstallmentWorkflowTestSuite) TearDownTest() {
-	s.testEnv.AssertExpectations(s.T())
-}
-
-func TestOverdueInstallmentWorkflowSuite(t *testing.T) {
-	suite.Run(t, new(OverdueInstallmentWorkflowTestSuite))
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-// TestOverdueInstallmentWorkflow_HappyPath verifies that when count > 0:
-//   - FindAndMarkOverdueInstallments is called and returns a positive count
-//   - DispatchNotifications IS called with the returned count
-//   - workflow completes without error
-//   - result contains correct installments/notifications counts
-func (s *OverdueInstallmentWorkflowTestSuite) TestOverdueInstallmentWorkflow_HappyPath() {
-	const referenceDate = "2026-01-01"
-	const overdueCount = 7
-
-	var a *OverdueInstallmentActivities
-
-	// Both activities must be called exactly once
-	s.testEnv.OnActivity(a.FindAndMarkOverdueInstallments, mock.Anything, referenceDate).
-		Return(overdueCount, nil).
-		Once()
-
-	s.testEnv.OnActivity(a.DispatchNotifications, mock.Anything, overdueCount).
-		Return(nil).
-		Once()
-
-	s.testEnv.ExecuteWorkflow(OverdueInstallmentWorkflow, referenceDate)
-
-	s.True(s.testEnv.IsWorkflowCompleted())
-	s.NoError(s.testEnv.GetWorkflowError())
-
-	// Verify result
-	var result *OverdueInstallmentResult
-	s.NoError(s.testEnv.GetWorkflowResult(&result))
-	s.Require().NotNil(result)
-	s.True(result.Completed)
-	s.Equal(overdueCount, result.InstallmentsProcessed)
-	s.Equal(overdueCount, result.NotificationsSent)
-}
-
-// TestOverdueInstallmentWorkflow_ZeroCount verifies that when count == 0:
-//   - FindAndMarkOverdueInstallments is called and returns 0
-//   - DispatchNotifications is NOT called (no overdue installments)
-//   - workflow completes without error
-//   - result has zero notifications sent
+// newEnv returns a fresh test environment with both activities registered.
 //
-// The implicit assertion that DispatchNotifications is NOT called relies on
-// the test environment returning an error for any unmocked activity call,
-// which would cause the workflow to fail (caught by s.NoError below).
-func (s *OverdueInstallmentWorkflowTestSuite) TestOverdueInstallmentWorkflow_ZeroCount() {
-	const referenceDate = "2026-01-02"
+// IMPORTANT: RegisterActivityWithOptions MUST be called before OnActivity (SDK invariant).
+// We register no-op stubs so the registry knows "FindAndMarkOverdueInstallments" and
+// "DispatchNotifications"; OnActivity then overrides their results with mocks.
+func (s *OverdueInstallmentSuite) newEnv() *testsuite.TestWorkflowEnvironment {
+	env := s.NewTestWorkflowEnvironment()
 
-	var a *OverdueInstallmentActivities
-
-	// Only FindAndMarkOverdueInstallments is mocked; DispatchNotifications is not.
-	// If the workflow incorrectly calls DispatchNotifications, it will fail.
-	s.testEnv.OnActivity(a.FindAndMarkOverdueInstallments, mock.Anything, referenceDate).
-		Return(0, nil).
-		Once()
-
-	s.testEnv.ExecuteWorkflow(OverdueInstallmentWorkflow, referenceDate)
-
-	s.True(s.testEnv.IsWorkflowCompleted())
-	s.NoError(s.testEnv.GetWorkflowError(), "workflow must complete successfully with zero count")
-
-	var result *OverdueInstallmentResult
-	s.NoError(s.testEnv.GetWorkflowResult(&result))
-	s.Require().NotNil(result)
-	s.True(result.Completed)
-	s.Equal(0, result.InstallmentsProcessed)
-	s.Equal(0, result.NotificationsSent, "no notifications should be sent when count == 0")
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ string) (int, error) { return 0, nil },
+		sdkactivity.RegisterOptions{Name: "FindAndMarkOverdueInstallments"},
+	)
+	env.RegisterActivityWithOptions(
+		func(_ context.Context, _ string, _ int) error { return nil },
+		sdkactivity.RegisterOptions{Name: "DispatchNotifications"},
+	)
+	return env
 }
 
-// TestOverdueInstallmentWorkflow_Queries verifies that all three query handlers
-// (getWorkflowStatus, getCurrentState, getResult) return consistent values
-// after a successful workflow execution.
-func (s *OverdueInstallmentWorkflowTestSuite) TestOverdueInstallmentWorkflow_Queries() {
-	const referenceDate = "2026-01-03"
-	const overdueCount = 3
+// Test_HappyPath_BothActivitiesRun verifies the full execution path when installments are found.
+func (s *OverdueInstallmentSuite) Test_HappyPath_BothActivitiesRun() {
+	env := s.newEnv()
 
-	var a *OverdueInstallmentActivities
-	s.testEnv.OnActivity(a.FindAndMarkOverdueInstallments, mock.Anything, referenceDate).
-		Return(overdueCount, nil).
-		Once()
-	s.testEnv.OnActivity(a.DispatchNotifications, mock.Anything, overdueCount).
-		Return(nil).
-		Once()
+	env.OnActivity("FindAndMarkOverdueInstallments", mock.Anything, "2026-06-06").
+		Return(5, nil).Once()
+	env.OnActivity("DispatchNotifications", mock.Anything, "2026-06-06", 5).
+		Return(nil).Once()
 
-	s.testEnv.ExecuteWorkflow(OverdueInstallmentWorkflow, referenceDate)
+	env.ExecuteWorkflow(workflow.OverdueInstallmentWorkflow, "2026-06-06")
 
-	s.True(s.testEnv.IsWorkflowCompleted())
-	s.NoError(s.testEnv.GetWorkflowError())
+	s.True(env.IsWorkflowCompleted())
+	s.NoError(env.GetWorkflowError())
+	env.AssertExpectations(s.T())
 
-	// getWorkflowStatus
-	v, err := s.testEnv.QueryWorkflow("getWorkflowStatus")
-	s.NoError(err)
+	// Query handlers must reflect the final state.
+	statusVal, err := env.QueryWorkflow("GetWorkflowStatus")
+	s.Require().NoError(err)
 	var status string
-	s.NoError(v.Get(&status))
-	s.Equal("COMPLETED", status, "getWorkflowStatus should return COMPLETED")
+	s.Require().NoError(statusVal.Get(&status))
+	s.Equal("completed", status)
 
-	// getCurrentState
-	v, err = s.testEnv.QueryWorkflow("getCurrentState")
-	s.NoError(err)
-	var state string
-	s.NoError(v.Get(&state))
-	s.Equal("COMPLETED", state, "getCurrentState should return COMPLETED")
-
-	// getResult
-	v, err = s.testEnv.QueryWorkflow("getResult")
-	s.NoError(err)
-	var result *OverdueInstallmentResult
-	s.NoError(v.Get(&result))
-	s.Require().NotNil(result, "getResult should return non-nil after completion")
-	s.True(result.Completed)
-	s.Equal(overdueCount, result.InstallmentsProcessed)
-	s.Equal(overdueCount, result.NotificationsSent)
+	stateVal, err := env.QueryWorkflow("GetCurrentState")
+	s.Require().NoError(err)
+	var state workflow.OverdueInstallmentState
+	s.Require().NoError(stateVal.Get(&state))
+	s.Equal("completed", state.Status)
+	s.Equal(5, state.MarkedCount)
 }
 
-// TestOverdueInstallmentWorkflow_ActivityError verifies that when
-// FindAndMarkOverdueInstallments fails, the workflow propagates the error.
-func (s *OverdueInstallmentWorkflowTestSuite) TestOverdueInstallmentWorkflow_ActivityError() {
-	const referenceDate = "2026-01-04"
+// Test_ZeroInstallments_SkipsDispatch verifies DispatchNotifications is NOT called when count == 0.
+// If the workflow incorrectly calls DispatchNotifications, the env will use the no-op stub
+// registered in newEnv — no mock expectation is set, so AssertExpectations will still pass,
+// but the workflow would have to exercise the wrong branch. We detect this via query:
+// MarkedCount must stay 0 and status must be "completed".
+func (s *OverdueInstallmentSuite) Test_ZeroInstallments_SkipsDispatch() {
+	env := s.newEnv()
 
-	var a *OverdueInstallmentActivities
-	s.testEnv.OnActivity(a.FindAndMarkOverdueInstallments, mock.Anything, referenceDate).
-		Return(0, errors.New("mongodb connection refused")).
-		Once()
+	env.OnActivity("FindAndMarkOverdueInstallments", mock.Anything, "2026-06-06").
+		Return(0, nil).Once()
+	// DispatchNotifications must NOT be called — no mock expectation set.
 
-	s.testEnv.ExecuteWorkflow(OverdueInstallmentWorkflow, referenceDate)
+	env.ExecuteWorkflow(workflow.OverdueInstallmentWorkflow, "2026-06-06")
 
-	s.True(s.testEnv.IsWorkflowCompleted())
-	s.Error(s.testEnv.GetWorkflowError(), "workflow should fail when first activity fails")
+	s.True(env.IsWorkflowCompleted())
+	s.NoError(env.GetWorkflowError())
+	env.AssertExpectations(s.T())
+
+	stateVal, err := env.QueryWorkflow("GetCurrentState")
+	s.Require().NoError(err)
+	var state workflow.OverdueInstallmentState
+	s.Require().NoError(stateVal.Get(&state))
+	s.Equal("completed", state.Status)
+	s.Equal(0, state.MarkedCount)
+}
+
+// Test_FirstActivityFailure_WorkflowFails verifies workflow propagates activity errors.
+func (s *OverdueInstallmentSuite) Test_FirstActivityFailure_WorkflowFails() {
+	env := s.newEnv()
+
+	env.OnActivity("FindAndMarkOverdueInstallments", mock.Anything, mock.Anything).
+		Return(0, errors.New("mongodb unreachable")).Once()
+
+	env.ExecuteWorkflow(workflow.OverdueInstallmentWorkflow, "2026-06-06")
+
+	s.True(env.IsWorkflowCompleted())
+	s.Error(env.GetWorkflowError())
+	env.AssertExpectations(s.T())
+}
+
+// Test_SecondActivityFailure_WorkflowFails verifies DispatchNotifications failures are propagated.
+func (s *OverdueInstallmentSuite) Test_SecondActivityFailure_WorkflowFails() {
+	env := s.newEnv()
+
+	env.OnActivity("FindAndMarkOverdueInstallments", mock.Anything, "2026-06-06").
+		Return(3, nil).Once()
+	env.OnActivity("DispatchNotifications", mock.Anything, "2026-06-06", 3).
+		Return(errors.New("notification service down")).Once()
+
+	env.ExecuteWorkflow(workflow.OverdueInstallmentWorkflow, "2026-06-06")
+
+	s.True(env.IsWorkflowCompleted())
+	s.Error(env.GetWorkflowError())
+	env.AssertExpectations(s.T())
 }

@@ -457,6 +457,11 @@ func main() {
 		pspReviewActivity := temporalactivity.NewPricingPspReviewActivity(pspReviewUC)
 		temporalRegistry.RegisterPricingPspReviewWorker(pspReviewActivity)
 
+		findMarkUC := ucpayment.NewFindAndMarkOverdueInstallments()
+		dispatchUC := ucnotification.NewDispatchOverdueNotifications()
+		overdueActs := temporalactivity.NewOverdueInstallmentActivities(findMarkUC, dispatchUC)
+		temporalRegistry.RegisterOverdueInstallmentWorker(overdueActs)
+
 		if startErr := temporalRegistry.Start(); startErr != nil {
 			slog.Error("failed to start Temporal workers", "error", startErr)
 			os.Exit(1)
@@ -470,6 +475,9 @@ func main() {
 		}
 		if schedErr := temporalworker.InitFinanceReconciliationSchedule(schedCtx, temporalClient); schedErr != nil {
 			slog.Warn("finance reconciliation schedule init failed", "error", schedErr)
+		}
+		if schedErr := temporalworker.InitOverdueInstallmentSchedule(schedCtx, temporalClient); schedErr != nil {
+			slog.Warn("overdue-installment schedule init failed", "error", schedErr)
 		}
 
 		slog.Info("temporal workers started",
