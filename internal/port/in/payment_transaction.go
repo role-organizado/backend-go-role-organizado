@@ -232,6 +232,17 @@ type ReaplicarFeePolicySnapshotUseCase interface {
 	Execute(ctx context.Context, in ReaplicarFeePolicySnapshotInput) error
 }
 
+// ─── Expiration ─────────────────────────────────────────────────────────────
+
+// ExpireTransactionUseCase marks a PENDING/PROCESSING payment transaction as
+// CANCELLED with failure reason TIMEOUT. Called by the PaymentExpirationWorkflow
+// activity after the expiry timer fires. Returns an error whose message is
+// "transaction already terminal" when the transaction is already in a final state
+// (safe to convert to Temporal non-retryable error).
+type ExpireTransactionUseCase interface {
+	Execute(ctx context.Context, transactionID string) error
+}
+
 // ─── PSP Reconciliation ─────────────────────────────────────────────────────
 
 // ReconcileFilter specifies the time window for a PSP reconciliation run.

@@ -44,6 +44,26 @@ type HandlePaymentCallback struct {
 	allocationSvc   *InstallmentAllocationService  // nil-safe
 	subledger       PaymentConfirmationWriter       // nil-safe
 	createNotifUC   portin.CreateNotificacaoUseCase // nil-safe
+	// temporalSignaler signals the PaymentExpirationWorkflow when payment is confirmed.
+	// nil-safe: disables Temporal signalling when not set.
+	temporalSignaler portout.TemporalWorkflowSignaler
+	// temporalStarter starts the PaymentConfirmationWorkflow for async retry semantics.
+	// nil-safe: disables Temporal workflow start when not set.
+	temporalStarter portout.TemporalWorkflowStarter
+}
+
+// WithTemporalSignaler attaches a Temporal signaler so the expiration workflow
+// receives a paymentCompleted signal when a webhook confirms the payment.
+func (uc *HandlePaymentCallback) WithTemporalSignaler(s portout.TemporalWorkflowSignaler) *HandlePaymentCallback {
+	uc.temporalSignaler = s
+	return uc
+}
+
+// WithTemporalStarter attaches a Temporal starter so the PaymentConfirmationWorkflow
+// is launched for async retry semantics when a webhook arrives.
+func (uc *HandlePaymentCallback) WithTemporalStarter(s portout.TemporalWorkflowStarter) *HandlePaymentCallback {
+	uc.temporalStarter = s
+	return uc
 }
 
 // NewHandlePaymentCallback creates a new HandlePaymentCallback use case.
@@ -122,13 +142,15 @@ func (uc *HandlePaymentCallback) Execute(ctx context.Context, in portin.PaymentC
 	)
 
 	// ── Step 4: Route to action ─────────────────────────────────────────────────
-	switch mapCallbackStatus(in.NewStatus) {
+	action := mapCallbackStatus(in.NewStatus)
+	var actionErr error
+	switch action {
 	case callbackActionApproved:
-		return uc.executeApproved(ctx, in)
+		actionErr = uc.executeApproved(ctx, in)
 	case callbackActionFailed:
-		return uc.executeFailed(ctx, in)
+		actionErr = uc.executeFailed(ctx, in)
 	case callbackActionCancelled:
-		return uc.executeCancelled(ctx, in)
+		actionErr = uc.executeCancelled(ctx, in)
 	default:
 		// Unknown/future status — log and treat as no-op.
 		slog.WarnContext(ctx, "handle payment callback: unrecognised status, treating as no-op",
@@ -137,6 +159,22 @@ func (uc *HandlePaymentCallback) Execute(ctx context.Context, in portin.PaymentC
 		)
 		return nil
 	}
+	if actionErr != nil {
+		return actionErr
+	}
+
+	// ── Step 5 (optional): Temporal integration ─────────────────────────────────
+	// Signal the PaymentExpirationWorkflow so it exits cleanly (avoids expiring a
+	// payment that was just confirmed). Best-effort: non-fatal if Temporal is down.
+	if uc.temporalSignaler != nil {
+		uc.signalExpirationWorkflow(ctx, in)
+	}
+	// Start the PaymentConfirmationWorkflow for audit trail and retry semantics.
+	if uc.temporalStarter != nil {
+		uc.startConfirmationWorkflow(ctx, in, action)
+	}
+
+	return nil
 }
 
 // ── Status classification ─────────────────────────────────────────────────────
@@ -361,6 +399,71 @@ func (uc *HandlePaymentCallback) notifyParticipant(ctx context.Context, tx *doma
 		},
 	})
 	return err
+}
+
+// ── Temporal helpers ──────────────────────────────────────────────────────────
+
+// signalExpirationWorkflow sends a paymentCompleted signal to the
+// PaymentExpirationWorkflow identified by the transaction ID.
+// Non-fatal: errors are logged at WARN level.
+func (uc *HandlePaymentCallback) signalExpirationWorkflow(ctx context.Context, in portin.PaymentCallbackPayload) {
+	// Look up the transaction to get the platform ID (needed for workflow ID).
+	tx, err := uc.txRepo.FindByProviderTransactionID(ctx, in.ProviderTransactionID)
+	if err != nil {
+		slog.WarnContext(ctx, "handle payment callback: cannot signal expiration workflow — transaction not found",
+			"providerTransactionID", in.ProviderTransactionID, "error", err)
+		return
+	}
+
+	workflowID := "payment-expiration-real-" + tx.ID
+	if signalErr := uc.temporalSignaler.SignalWorkflow(ctx, workflowID, "paymentCompleted", in.NewStatus); signalErr != nil {
+		// Non-fatal: workflow may have already completed (timer fired before webhook).
+		slog.WarnContext(ctx, "handle payment callback: signal expiration workflow failed (non-fatal)",
+			"workflowID", workflowID, "error", signalErr)
+	}
+}
+
+// startConfirmationWorkflow starts a PaymentConfirmationWorkflow for async retry semantics.
+// Non-fatal: errors are logged at WARN level.
+func (uc *HandlePaymentCallback) startConfirmationWorkflow(ctx context.Context, in portin.PaymentCallbackPayload, action callbackAction) {
+	callbackType := string(action)
+	switch action {
+	case callbackActionApproved:
+		callbackType = "APPROVED"
+	case callbackActionFailed:
+		callbackType = "FAILED"
+	case callbackActionCancelled:
+		callbackType = "CANCELLED"
+	}
+
+	workflowID := "payment-confirmation-real-" + in.ProviderTransactionID + "-" + strings.ToLower(callbackType)
+
+	type confirmationInput struct {
+		ProviderTransactionID string `json:"providerTransactionId"`
+		ProviderName          string `json:"providerName"`
+		CallbackType          string `json:"callbackType"`
+		FailureReason         string `json:"failureReason,omitempty"`
+		ProviderEventID       string `json:"providerEventId"`
+		EventType             string `json:"eventType"`
+	}
+
+	input := confirmationInput{
+		ProviderTransactionID: in.ProviderTransactionID,
+		ProviderName:          string(in.Provider),
+		CallbackType:          callbackType,
+		FailureReason:         in.NewStatus,
+		ProviderEventID:       in.ProviderEventID,
+		EventType:             in.EventType,
+	}
+
+	startErr := uc.temporalStarter.StartWorkflow(ctx, portout.WorkflowStartOptions{
+		WorkflowID: workflowID,
+		TaskQueue:  "payment-queue",
+	}, "PaymentConfirmationWorkflow", input)
+	if startErr != nil {
+		slog.WarnContext(ctx, "handle payment callback: start confirmation workflow failed (non-fatal)",
+			"workflowID", workflowID, "error", startErr)
+	}
 }
 
 // compile-time assertion.

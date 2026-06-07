@@ -26,6 +26,7 @@ import (
 //  8. Fetch method-specific data (PIX QR code, Boleto identification field)
 //  9. Update transaction with provider data; CC immediately confirmed → COMPLETED
 //  10. Persist SavedCreditCard if SaveCard=true
+//  11. Start PaymentExpirationWorkflow for PIX/Boleto with ExpiresAt (if enabled)
 type ProcessPayment struct {
 	txRepo           portout.PaymentTransactionRepository
 	customerLinkRepo portout.AsaasCustomerLinkRepository
@@ -35,6 +36,16 @@ type ProcessPayment struct {
 	providerName     domain.PaymentProvider // ASAAS or MOCK
 	feePolicy        FeePolicyResolver
 	subledger        PaymentCommitmentWriter
+	// temporalStarter is optional — nil disables workflow start (Strangler Fig: false by default).
+	temporalStarter portout.TemporalWorkflowStarter
+}
+
+// WithTemporalStarter attaches a Temporal workflow starter so that PIX/Boleto
+// transactions start a PaymentExpirationWorkflow after being persisted.
+// Returns the same *ProcessPayment for fluent chaining.
+func (uc *ProcessPayment) WithTemporalStarter(starter portout.TemporalWorkflowStarter) *ProcessPayment {
+	uc.temporalStarter = starter
+	return uc
 }
 
 // NewProcessPayment creates a new ProcessPayment use case.
@@ -253,7 +264,18 @@ func (uc *ProcessPayment) Execute(ctx context.Context, in portin.ProcessPaymentI
 		return nil, fmt.Errorf("process payment: update transaction: %w", updateErr)
 	}
 
-	// ── Step 10: Persist saved card ─────────────────────────────────────────────
+	// ── Step 10 (optional): Start PaymentExpirationWorkflow for PIX/Boleto ────────
+	// Only started when Temporal is enabled (temporalStarter != nil) and ExpiresAt is set.
+	// Non-fatal: a failure to start the workflow does not fail the payment.
+	if uc.temporalStarter != nil && tx.ExpiresAt != nil &&
+		(tx.PaymentMethod == domain.PaymentMethodPix || tx.PaymentMethod == domain.PaymentMethodBoleto) {
+		if wfErr := uc.startExpirationWorkflow(ctx, tx); wfErr != nil {
+			slog.WarnContext(ctx, "process payment: failed to start expiration workflow (non-fatal)",
+				"transactionID", tx.ID, "error", wfErr)
+		}
+	}
+
+	// ── Step 11: Persist saved card ─────────────────────────────────────────────
 	if in.SaveCard && cardToken != "" && in.Method == domain.PaymentMethodCreditCard && in.CreditCard != nil {
 		expirationDate := ""
 		if in.CreditCard.ExpiryMonth != "" && in.CreditCard.ExpiryYear != "" {
@@ -344,6 +366,28 @@ func methodToBillingType(method domain.PaymentMethod) portout.PaymentBillingType
 	default:
 		return portout.BillingTypePix
 	}
+}
+
+// startExpirationWorkflow starts a PaymentExpirationWorkflow for the given transaction.
+// The workflow sleeps until ExpiresAt, then marks the transaction CANCELLED if no
+// paymentCompleted signal has been received.
+func (uc *ProcessPayment) startExpirationWorkflow(ctx context.Context, tx *domain.PaymentTransaction) error {
+	// Import workflow IDs lazily (avoid import cycle via portout interface).
+	workflowID := "payment-expiration-real-" + tx.ID
+	expiresAtMs := tx.ExpiresAt.UnixMilli()
+
+	type expirationInput struct {
+		TransactionID   string `json:"transactionId"`
+		ExpiresAtMillis int64  `json:"expiresAtMillis"`
+	}
+
+	return uc.temporalStarter.StartWorkflow(ctx, portout.WorkflowStartOptions{
+		WorkflowID: workflowID,
+		TaskQueue:  "payment-queue",
+	}, "PaymentExpirationWorkflow", expirationInput{
+		TransactionID:   tx.ID,
+		ExpiresAtMillis: expiresAtMs,
+	})
 }
 
 // compile-time assertion: *ProcessPayment implements portin.ProcessPaymentUseCase.

@@ -21,6 +21,9 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/handler"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
+	temporaladapter "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal"
+	temporalactivity "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
+	temporalworker "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/worker"
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
 	"github.com/role-organizado/backend-go-role-organizado/migrations"
 	pkgjwt "github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
@@ -373,7 +376,59 @@ func main() {
 	removeItemUC := uclistapresentes.NewRemoveItem(listaPresentesRepo)
 	listaPresentesHandler := handler.NewListaPresentesHandler(addItemUC, getItemUC, listItemsUC, reservarItemUC, removeItemUC)
 
-	// --- Phase 8: Temporal Workflow Proxies ---
+	// --- Phase 8: Temporal Worker (payment workflows) ---
+	// Enabled via TEMPORAL_WORKER_ENABLED=true (default: false during Strangler Fig migration).
+	// When disabled, no-op starters/signalers are used so the payment use cases compile and
+	// run correctly without a live Temporal cluster.
+	var temporalStarter portout.TemporalWorkflowStarter = &temporaladapter.NoopWorkflowStarter{}
+	var temporalSignaler portout.TemporalWorkflowSignaler = &temporaladapter.NoopWorkflowSignaler{}
+
+	if cfg.Temporal.WorkerEnabled {
+		temporalClient, temporalErr := temporaladapter.NewClient(cfg.Temporal)
+		if temporalErr != nil {
+			slog.Error("failed to connect to Temporal", "error", temporalErr)
+			os.Exit(1)
+		}
+		defer temporalClient.Close()
+
+		temporalStarter = temporaladapter.NewClientWorkflowStarter(temporalClient)
+		temporalSignaler = temporaladapter.NewClientWorkflowSignaler(temporalClient)
+
+		// Build activities and register workers.
+		reconcileReportRepo := mongodb.NewReconciliationReportRepository(mongoClient)
+		expireUC := ucpayment.NewExpireTransaction(txRepo)
+		reconcileUC := ucpayment.NewReconcilePspTransactions(txRepo, paymentProvider)
+
+		paymentActs := temporalactivity.NewPaymentActivities(
+			txRepo, expireUC, handlePaymentCallbackUC, reconcileUC, reconcileReportRepo,
+		)
+
+		temporalRegistry := temporalworker.NewRegistry(temporalClient)
+		temporalRegistry.RegisterPaymentWorker(paymentActs)
+		temporalRegistry.RegisterReconciliationWorker(paymentActs)
+
+		if startErr := temporalRegistry.Start(); startErr != nil {
+			slog.Error("failed to start Temporal workers", "error", startErr)
+			os.Exit(1)
+		}
+		defer temporalRegistry.Stop()
+
+		slog.Info("temporal workers started",
+			"hostPort", cfg.Temporal.HostPort,
+			"namespace", cfg.Temporal.Namespace,
+		)
+	} else {
+		slog.Info("temporal workers disabled (TEMPORAL_WORKER_ENABLED=false)")
+	}
+
+	// Wire Temporal starters/signalers into payment use cases (nil-safe, non-breaking).
+	// ProcessBatchPayment: TODO add WithTemporalStarter when batch expiration is required.
+	processPaymentUC.WithTemporalStarter(temporalStarter)
+	handlePaymentCallbackUC.
+		WithTemporalSignaler(temporalSignaler).
+		WithTemporalStarter(temporalStarter)
+
+	// --- Phase 8b: Temporal Workflow Proxies (Java fallback) ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
 	// --- Phase 5b: Payment Methods + PIX validate + Saved Cards (hexagonal) ---

@@ -70,6 +70,10 @@ type TemporalConfig struct {
 	// HostPort is the Temporal frontend address (e.g. "10.11.12.244:7233").
 	HostPort  string
 	Namespace string
+	// WorkerEnabled controls whether the Go Temporal worker starts.
+	// Default false during Strangler Fig migration; flip to true after staging validation.
+	// Set via TEMPORAL_WORKER_ENABLED env var.
+	WorkerEnabled bool
 }
 
 // RedisConfig holds Redis connection settings.
@@ -165,8 +169,9 @@ func Load() (*AppConfig, error) {
 			Enabled:        v.GetBool("otel.enabled"),
 		},
 		Temporal: TemporalConfig{
-			HostPort:  v.GetString("temporal.host_port"),
-			Namespace: v.GetString("temporal.namespace"),
+			HostPort:      v.GetString("temporal.host_port"),
+			Namespace:     v.GetString("temporal.namespace"),
+			WorkerEnabled: v.GetBool("temporal.worker_enabled"),
 		},
 		Redis: RedisConfig{
 			Addr:     v.GetString("redis.addr"),
@@ -214,6 +219,8 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("temporal.host_port", "10.11.12.244:7233")
 	v.SetDefault("temporal.namespace", "default")
+	v.SetDefault("temporal.worker_enabled", false)
+	_ = v.BindEnv("temporal.worker_enabled", "TEMPORAL_WORKER_ENABLED")
 
 	v.SetDefault("redis.addr", "localhost:6379")
 	v.SetDefault("redis.db", 0)
