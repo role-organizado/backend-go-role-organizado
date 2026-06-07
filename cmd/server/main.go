@@ -517,6 +517,21 @@ func main() {
 	cardapioHandler := handler.NewCardapioHandler(mongoClient)
 	outboundRequestHandler := handler.NewOutboundRequestHandler(mongoClient)
 
+	// --- Phase 9: Temporal Workers ---
+	temporalClient, err := temporaladapter.NewClient(cfg.Temporal)
+	if err != nil {
+		slog.Error("failed to connect to Temporal", "error", err)
+		os.Exit(1)
+	}
+	defer temporalClient.Close()
+	temporalRegistry := temporalworker.NewRegistry(temporalClient)
+	// Workers are registered per migration wave (T003, T004, T005, T006).
+	if err := temporalRegistry.Start(); err != nil {
+		slog.Error("failed to start Temporal workers", "error", err)
+		os.Exit(1)
+	}
+	defer temporalRegistry.Stop()
+
 	// Build chi router.
 	r := chi.NewRouter()
 
