@@ -46,6 +46,10 @@ import (
 	uccofrinho "github.com/role-organizado/backend-go-role-organizado/internal/usecase/cofrinho"
 	// Lista Presentes
 	uclistapresentes "github.com/role-organizado/backend-go-role-organizado/internal/usecase/listapresentes"
+	// Phase 8b: Temporal Workers
+	sandboxact "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
+	temporalworker "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/worker"
+	temporalclient "go.temporal.io/sdk/client"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -307,6 +311,29 @@ func main() {
 
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
+
+	// --- Phase 8b: Temporal Workers (POC — sandbox validates foundation E2E) ---
+	// Worker startup is non-fatal: the HTTP proxy handler (Phase 8) remains active
+	// for any workflow not yet served by a Go worker.
+	tclient, tcErr := temporalclient.Dial(temporalclient.Options{
+		HostPort:  cfg.Temporal.HostPort,
+		Namespace: cfg.Temporal.Namespace,
+	})
+	if tcErr != nil {
+		slog.Warn("temporal client unavailable — workers disabled, proxy remains active",
+			"hostPort", cfg.Temporal.HostPort, "error", tcErr)
+	} else {
+		temporalRegistry := temporalworker.NewRegistry(tclient)
+		temporalRegistry.RegisterSandboxWorker(sandboxact.NewSandboxActivity())
+		if startErr := temporalRegistry.Start(); startErr != nil {
+			slog.Warn("temporal workers failed to start — proxy remains active", "error", startErr)
+			tclient.Close()
+		} else {
+			slog.Info("temporal workers started", "hostPort", cfg.Temporal.HostPort)
+			defer temporalRegistry.Stop()
+			defer tclient.Close()
+		}
+	}
 
 	// --- Finance, Admin, Participantes handlers (direct MongoDB) ---
 	financeHandler := handler.NewFinanceHandler(mongoClient)
