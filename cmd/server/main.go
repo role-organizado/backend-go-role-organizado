@@ -279,6 +279,11 @@ func main() {
 		txRepo, customerLinkRepo, usuarioRepo, savedCardRepo,
 		paymentProvider, providerName, feePolicySvc, subledgerSvc,
 	)
+	processBatchPaymentUC := ucpayment.NewProcessBatchPayment(
+		installmentRepo, participanteRepo,
+		txRepo, customerLinkRepo, usuarioRepo, savedCardRepo,
+		paymentProvider, providerName, feePolicySvc, subledgerSvc,
+	)
 	getTransactionUC := ucpayment.NewGetPaymentTransaction(txRepo)
 	listUserPaymentsUC := ucpayment.NewListUserPayments(txRepo)
 
@@ -290,7 +295,7 @@ func main() {
 	paymentHandler := handler.NewPaymentHandler(
 		createPayUC, getPayUC, listPayUC, updatePayUC, deletePayUC,
 		confirmarPayUC, upsertCfgPayUC, getCfgPayUC,
-		processPaymentUC, getTransactionUC, listUserPaymentsUC, paymentProvider,
+		processPaymentUC, processBatchPaymentUC, getTransactionUC, listUserPaymentsUC, paymentProvider,
 	)
 	installmentHandler := handler.NewInstallmentHandler(
 		listUserInstallmentsUC, listInstallmentsUC, getInstallmentUC, cancelInstallmentsUC,
@@ -327,6 +332,17 @@ func main() {
 	notificationHandler := handler.NewNotificationHandler(
 		listNotifUC, getNotifUC, createNotifUC, marcarLidaUC, marcarTodasUC, deleteNotifUC, countUnreadUC,
 	)
+
+	// --- Phase 5c: Webhook callback (wired here — depends on createNotifUC from Phase 6) ---
+	webhookRepo := mongodb.NewProcessedWebhookEventRepository(mongoClient)
+	allocationSvc := ucpayment.NewInstallmentAllocationService(
+		mongoClient.Collection("installment_allocations"),
+		installmentRepo,
+	)
+	handlePaymentCallbackUC := ucpayment.NewHandlePaymentCallback(
+		txRepo, installmentRepo, webhookRepo, allocationSvc, subledgerSvc, createNotifUC,
+	)
+	paymentWebhookHandler := handler.NewPaymentWebhookHandler(handlePaymentCallbackUC, cfg.Asaas.WebhookToken)
 
 	// --- Phase 7: File Storage (GridFS) ---
 	arquivoRepo := mongodb.NewArquivoRepository(mongoClient)
@@ -394,8 +410,9 @@ func main() {
 
 	// --- Public routes (no JWT required) ---
 	authHandler.RegisterRoutes(r)
-	configHandler.RegisterRoutes(r) // GET /api/v1/dominios (public read) + admin write
+	configHandler.RegisterRoutes(r)          // GET /api/v1/dominios (public read) + admin write
 	cardapioHandler.RegisterCardapioRoutes(r) // GET /api/cardapios (public — Java parity)
+	paymentWebhookHandler.RegisterWebhookRoutes(r) // POST /api/v1/webhooks/payment/asaas (no JWT)
 
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {

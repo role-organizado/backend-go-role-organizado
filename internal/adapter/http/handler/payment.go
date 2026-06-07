@@ -38,10 +38,11 @@ type PaymentHandler struct {
 	getCfgUC    portin.GetConfigPagamentoUseCase
 
 	// ── PaymentTransaction (real Asaas charges) ──────────────────────────────────
-	processPaymentUC   portin.ProcessPaymentUseCase
-	getTransactionUC   portin.GetPaymentTransactionUseCase
-	listUserPaymentsUC portin.ListUserPaymentsUseCase
-	provider           portout.PaymentProvider // used by sandbox-simulate
+	processPaymentUC      portin.ProcessPaymentUseCase
+	processBatchPaymentUC portin.ProcessBatchPaymentUseCase
+	getTransactionUC      portin.GetPaymentTransactionUseCase
+	listUserPaymentsUC    portin.ListUserPaymentsUseCase
+	provider              portout.PaymentProvider // used by sandbox-simulate
 }
 
 // NewPaymentHandler creates a PaymentHandler with all use cases wired in.
@@ -55,23 +56,25 @@ func NewPaymentHandler(
 	upsertCfg portin.UpsertConfigPagamentoUseCase,
 	getCfg portin.GetConfigPagamentoUseCase,
 	processPayment portin.ProcessPaymentUseCase,
+	processBatchPayment portin.ProcessBatchPaymentUseCase,
 	getTransaction portin.GetPaymentTransactionUseCase,
 	listUserPayments portin.ListUserPaymentsUseCase,
 	provider portout.PaymentProvider,
 ) *PaymentHandler {
 	return &PaymentHandler{
-		createUC:           create,
-		getUC:              get,
-		listUC:             list,
-		updateUC:           update,
-		deleteUC:           del,
-		confirmarUC:        confirmar,
-		upsertCfgUC:        upsertCfg,
-		getCfgUC:           getCfg,
-		processPaymentUC:   processPayment,
-		getTransactionUC:   getTransaction,
-		listUserPaymentsUC: listUserPayments,
-		provider:           provider,
+		createUC:              create,
+		getUC:                 get,
+		listUC:                list,
+		updateUC:              update,
+		deleteUC:              del,
+		confirmarUC:           confirmar,
+		upsertCfgUC:           upsertCfg,
+		getCfgUC:              getCfg,
+		processPaymentUC:      processPayment,
+		processBatchPaymentUC: processBatchPayment,
+		getTransactionUC:      getTransaction,
+		listUserPaymentsUC:    listUserPayments,
+		provider:              provider,
 	}
 }
 
@@ -93,6 +96,9 @@ func (h *PaymentHandler) RegisterPaymentRoutes(r chi.Router) {
 
 	// POST /api/v1/payments/process — real Asaas payment (replaces stub)
 	r.Post("/api/v1/payments/process", h.processPayment)
+
+	// POST /api/v1/payments/batch — atomic batch charge for multiple installments
+	r.Post("/api/v1/payments/batch", h.processBatch)
 
 	// GET /api/v1/payments/user — list transactions for JWT user
 	r.Get("/api/v1/payments/user", h.listUserPayments)
@@ -327,6 +333,74 @@ func pagamentoToResponse(p *domain.PagamentoMensal) pagamentoResponse {
 }
 
 // ─── PaymentTransaction handlers ─────────────────────────────────────────────
+
+// ─── Batch payment request / response ────────────────────────────────────────
+
+// batchPaymentRequest is the body for POST /api/v1/payments/batch.
+// Field names match the Java BatchPaymentRequest exactly.
+type batchPaymentRequest struct {
+	InstallmentIDs []string           `json:"installmentIds"`
+	PaymentMethod  string             `json:"paymentMethod"`
+	IdempotencyKey string             `json:"idempotencyKey"`
+	CPF            string             `json:"cpf"`
+	CreditCard     *creditCardRequest `json:"creditCard,omitempty"`
+	SaveCard       bool               `json:"saveCard"`
+	SavedCardID    string             `json:"savedCardId,omitempty"`
+}
+
+// processBatch handles POST /api/v1/payments/batch.
+// Atomically charges multiple installments in one PaymentTransaction.
+func (h *PaymentHandler) processBatch(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if userID == "" {
+		writeError(w, apierr.Unauthorized("autenticação necessária"))
+		return
+	}
+
+	var req batchPaymentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
+		return
+	}
+
+	if len(req.InstallmentIDs) == 0 {
+		writeError(w, apierr.BadRequest("installmentIds não pode ser vazio"))
+		return
+	}
+
+	in := portin.ProcessBatchPaymentInput{
+		UserID:         userID,
+		InstallmentIDs: req.InstallmentIDs,
+		Method:         domain.PaymentMethod(req.PaymentMethod),
+		IdempotencyKey: req.IdempotencyKey,
+		CPF:            req.CPF,
+		ClientIP:       clientIP(r),
+		SaveCard:       req.SaveCard,
+		SavedCardID:    req.SavedCardID,
+	}
+
+	if req.CreditCard != nil {
+		in.CreditCard = &portin.CreditCardInput{
+			HolderName:   req.CreditCard.HolderName,
+			Number:       req.CreditCard.Number,
+			ExpiryMonth:  req.CreditCard.ExpiryMonth,
+			ExpiryYear:   req.CreditCard.ExpiryYear,
+			CVV:          req.CreditCard.CVV,
+			Installments: req.CreditCard.Installments,
+			TokenRef:     req.CreditCard.TokenRef,
+		}
+	}
+
+	resp, err := h.processBatchPaymentUC.Execute(r.Context(), in)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// ─── Single payment request ───────────────────────────────────────────────────
 
 // processPaymentRequest is the body for POST /api/v1/payments/process.
 // Field names match the Java PaymentProcessRequest exactly.

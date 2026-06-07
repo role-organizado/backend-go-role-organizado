@@ -156,5 +156,72 @@ func (s *SubledgerDualWriteService) AppendPaymentCommitment(
 	return nil
 }
 
-// compile-time assertion: *SubledgerDualWriteService implements PaymentCommitmentWriter.
+// AppendPaymentConfirmation writes a PAYMENT_CONFIRMATION ledger entry when a
+// payment is confirmed via webhook callback. This mirrors the Java
+// SubledgerDualWriteService.confirmPayment(). A duplicate-key error is treated as
+// a no-op (idempotent under concurrent delivery).
+func (s *SubledgerDualWriteService) AppendPaymentConfirmation(
+	ctx context.Context,
+	tx *domain.PaymentTransaction,
+) error {
+	sourceEventID := "payment:confirmation:" + tx.ID
+	competenceMonth := tx.CreatedAt.Format("2006-01")
+
+	entry := ledgerEntryDocument{
+		SourceEventID:  sourceEventID,
+		SourceType:     "PAYMENT",
+		EntryType:      "PAYMENT_CONFIRMATION",
+		CommittedDelta: tx.AmountCents,
+		Metadata: bson.M{
+			"transactionId":         tx.ID,
+			"provider":              string(tx.Provider),
+			"paymentMethod":         string(tx.PaymentMethod),
+			"grossAmountCents":      tx.AmountCents,
+			"providerTransactionId": tx.ProviderTransactionID,
+			"completedAt":           tx.CompletedAt,
+		},
+		CompetenceMonth: competenceMonth,
+		CreatedAt:       time.Now(),
+	}
+
+	_, err := s.ledgerEntries.InsertOne(ctx, entry)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			slog.DebugContext(ctx, "subledger: confirmation already exists, skipping (idempotent)",
+				"sourceEventId", sourceEventID)
+			return nil
+		}
+		return fmt.Errorf("subledger: insert confirmation entry: %w", err)
+	}
+
+	// Upsert ledger_snapshot_events to track the latest confirmation for this event.
+	snapshotKey := "payment:" + tx.EventID
+	now := time.Now()
+	snapshotDoc := ledgerSnapshotEventDocument{
+		ID:          snapshotKey,
+		LastEventID: sourceEventID,
+		EventID:     tx.EventID,
+		ProcessedAt: now,
+		UpdatedAt:   now,
+	}
+	_, err = s.ledgerSnapshotEvents.ReplaceOne(
+		ctx,
+		bson.D{{Key: "_id", Value: snapshotKey}},
+		snapshotDoc,
+		options.Replace().SetUpsert(true),
+	)
+	if err != nil {
+		// Non-fatal: entry is already persisted.
+		slog.WarnContext(ctx, "subledger: update snapshot event for confirmation failed (non-fatal)",
+			"snapshotKey", snapshotKey, "error", err)
+	}
+
+	slog.DebugContext(ctx, "subledger: payment confirmation appended",
+		"sourceEventId", sourceEventID,
+		"confirmedDeltaCents", tx.AmountCents)
+
+	return nil
+}
+
+// compile-time assertions.
 var _ PaymentCommitmentWriter = (*SubledgerDualWriteService)(nil)

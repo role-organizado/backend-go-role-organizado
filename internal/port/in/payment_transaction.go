@@ -43,30 +43,37 @@ type ProcessPaymentUseCase interface {
 
 // ─── Batch Payment ──────────────────────────────────────────────────────────
 
-// BatchPaymentItem represents one installment within an atomic batch charge.
-type BatchPaymentItem struct {
-	InstallmentID string
-	AmountCents   int64
-}
-
 // ProcessBatchPaymentInput is the command for charging multiple installments
 // atomically (all-or-nothing semantics).
+// InstallmentIDs are resolved to amounts by fetching the installment records;
+// the caller does NOT supply amounts — they come from the DB.
 type ProcessBatchPaymentInput struct {
 	UserID         string
-	EventID        string
-	Items          []BatchPaymentItem
+	InstallmentIDs []string // IDs of installments to pay; amounts fetched from DB
 	Method         domain.PaymentMethod
 	IdempotencyKey string
 	CPF            string
 	ClientIP       string
-	CreditCard     *CreditCardInput
+	CreditCard     *CreditCardInput // required when Method == CREDIT_CARD
 	SaveCard       bool
+	SavedCardID    string // optional: ID of a previously saved credit card
+}
+
+// BatchPaymentResponse is the result of an atomic batch payment operation.
+// Field names mirror the Java BatchPaymentResponse exactly.
+type BatchPaymentResponse struct {
+	Success          bool   `json:"success"`
+	ProcessedCount   int    `json:"processedCount"`
+	TotalAmountCents int64  `json:"totalAmountCents"`
+	TransactionID    string `json:"transactionId"`
+	Error            string `json:"error,omitempty"`
+	Message          string `json:"message"`
 }
 
 // ProcessBatchPaymentUseCase charges multiple installments in a single atomic
-// operation. On failure all charges are rolled back.
+// operation. On failure all charges are rolled back and no installments are modified.
 type ProcessBatchPaymentUseCase interface {
-	Execute(ctx context.Context, in ProcessBatchPaymentInput) ([]*domain.PaymentTransaction, error)
+	Execute(ctx context.Context, in ProcessBatchPaymentInput) (*BatchPaymentResponse, error)
 }
 
 // ─── Get / List Transactions ────────────────────────────────────────────────
