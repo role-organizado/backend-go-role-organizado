@@ -2,10 +2,16 @@ package out
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
 )
+
+// ErrAlreadyProcessed is returned by ProcessedWebhookEventRepository.SaveUnique when
+// the (provider, eventID) pair has already been recorded — the caller should treat
+// this as a no-op, not an error.
+var ErrAlreadyProcessed = errors.New("webhook event already processed")
 
 // TransactionFilter holds optional query parameters for paginated transaction
 // listing. Zero values are ignored (no filter applied for that field).
@@ -65,6 +71,10 @@ type PaymentAccountRepository interface {
 	FindDefaultByUserID(ctx context.Context, userID string) (*domain.PaymentAccount, error)
 	Save(ctx context.Context, acct *domain.PaymentAccount) error
 	Update(ctx context.Context, acct *domain.PaymentAccount) error
+	// SetDefault atomically clears is_default on all accounts of the user and sets
+	// it on the target account. Callers use this instead of two separate Updates.
+	SetDefault(ctx context.Context, userID, accountID string) error
+	// DeleteByID performs a soft delete (sets is_active = false).
 	DeleteByID(ctx context.Context, id string) error
 }
 
@@ -75,6 +85,10 @@ type SavedCreditCardRepository interface {
 	FindDefaultByUserID(ctx context.Context, userID string) (*domain.SavedCreditCard, error)
 	Save(ctx context.Context, card *domain.SavedCreditCard) error
 	Update(ctx context.Context, card *domain.SavedCreditCard) error
+	// SetDefault atomically clears is_default on all cards of the user and sets
+	// it on the target card.
+	SetDefault(ctx context.Context, userID, cardID string) error
+	// DeleteByID performs a soft delete (sets is_active = false).
 	DeleteByID(ctx context.Context, id string) error
 }
 

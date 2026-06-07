@@ -126,6 +126,10 @@ func main() {
 		slog.Error("migration v083 failed", "error", err)
 		os.Exit(1)
 	}
+	if err := migrations.RunV084CreatePaymentTransactionsIndexes(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v084 failed", "error", err)
+		os.Exit(1)
+	}
 
 	// Build JWT service.
 	jwtSvc, err := pkgjwt.NewService(
