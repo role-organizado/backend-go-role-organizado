@@ -11,37 +11,66 @@ import (
 	temporalworkflow "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
 )
 
+// ScheduleInitializer creates and upserts Temporal Schedules for periodic workflows.
+// It mirrors the Java TemporalScheduleInitializer / app.temporal.schedules configuration.
+type ScheduleInitializer struct {
+	client client.Client
+}
+
+// NewScheduleInitializer creates a new ScheduleInitializer backed by a Temporal client.
+func NewScheduleInitializer(c client.Client) *ScheduleInitializer {
+	return &ScheduleInitializer{client: c}
+}
+
+// InitializeReconciliationSchedule creates or updates the daily PSP reconciliation
+// Temporal Schedule. The schedule triggers ReconciliationWorkflow every day at 06:00.
+func (si *ScheduleInitializer) InitializeReconciliationSchedule(ctx context.Context) error {
+	scheduleID := temporalworkflow.PspReconciliationScheduledID
+
+	handle := si.client.ScheduleClient().GetHandle(ctx, scheduleID)
+	_, descErr := handle.Describe(ctx)
+	if descErr == nil {
+		slog.InfoContext(ctx, "temporal: reconciliation schedule already exists, skipping upsert",
+			"scheduleID", scheduleID)
+		return nil
+	}
+
+	_, err := si.client.ScheduleClient().Create(ctx, client.ScheduleOptions{
+		ID: scheduleID,
+		Spec: client.ScheduleSpec{
+			CronExpressions: []string{"0 6 * * *"},
+		},
+		Action: &client.ScheduleWorkflowAction{
+			Workflow:  temporalworkflow.ReconciliationWorkflow,
+			TaskQueue: temporalworkflow.ReconciliationTaskQueue,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("temporal: create reconciliation schedule: %w", err)
+	}
+
+	slog.InfoContext(ctx, "temporal: reconciliation schedule created", "scheduleID", scheduleID)
+	return nil
+}
+
 // InitFinanceReconciliationSchedule creates the daily finance reconciliation schedule.
-//
-// Schedule ID  : "finance-reconciliation-daily-workflow"
-// Cron         : "0 5 * * *"  (02:00 BRT = 05:00 UTC)
-// Task queue   : FINANCE_RECONCILIATION_QUEUE
-//
-// The workflow is started with an empty referenceDate; the workflow itself computes
-// yesterday's date (UTC) at execution time — the expected reference for a nightly run.
-//
-// Idempotent: if the schedule already exists the function logs and returns nil.
+// Cron: "0 5 * * *" (02:00 BRT = 05:00 UTC). Idempotent — skips if already exists.
 func InitFinanceReconciliationSchedule(ctx context.Context, c client.Client) error {
 	const scheduleID = "finance-reconciliation-daily-workflow"
 
 	_, err := c.ScheduleClient().Create(ctx, client.ScheduleOptions{
 		ID: scheduleID,
 		Spec: client.ScheduleSpec{
-			// 02:00 BRT = 05:00 UTC (BRT = UTC-3)
 			CronExpressions: []string{"0 5 * * *"},
 		},
 		Action: &client.ScheduleWorkflowAction{
-			// WorkflowID for scheduled runs — distinct from manual runs which use
-			// ids.FinanceReconciliationPrimaryID(referenceDate).
 			ID:        "finance-reconciliation-daily",
 			Workflow:  temporalworkflow.FinanceReconciliationWorkflow,
 			TaskQueue: FinanceReconciliationQueue,
-			// Empty referenceDate → workflow computes yesterday's date at execution time.
-			Args: []any{""},
+			Args:      []any{""},
 		},
 	})
 	if err != nil {
-		// Idempotent: skip if schedule already exists.
 		if strings.Contains(strings.ToLower(err.Error()), "already") {
 			slog.Info("temporal schedule already exists, skipping creation",
 				"scheduleID", scheduleID)

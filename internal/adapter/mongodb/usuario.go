@@ -2,9 +2,6 @@ package mongodb
 
 import (
 	"context"
-	"encoding/hex"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,78 +59,6 @@ type usuarioDocument struct {
 	Ativo          bool               `bson:"ativo"`
 	CriadoEm      time.Time          `bson:"criado_em"`
 	UpdatedAt      time.Time          `bson:"updated_at"`
-}
-
-// userIDValue converts a user ID string to its appropriate BSON value for storage,
-// preserving round-trip fidelity when read back via rawIDToString.
-//
-// Rules:
-//   - 24-char hex → bson.ObjectID (for Go-created users whose _id is ObjectID)
-//   - UUID string (8-4-4-4-12) → bson.Binary{Subtype: 4}
-//   - Anything else → the string itself
-//
-// This is critical for ownership checks: rawIDToString(userIDValue(id)) == id.
-func userIDValue(id string) interface{} {
-	if id == "" {
-		return nil
-	}
-	// Try as ObjectID hex (exactly 24 hex chars)
-	if oid, err := bson.ObjectIDFromHex(id); err == nil {
-		return oid
-	}
-	// Try as UUID string (8-4-4-4-12 format)
-	if u, err := uuid.Parse(id); err == nil {
-		b := [16]byte(u)
-		return bson.Binary{Subtype: 0x04, Data: b[:]}
-	}
-	return id
-}
-
-// rawIDToString converts any MongoDB _id value to a string representation.
-// Handles ObjectID (hex string), UUID Binary (UUID string format), and plain strings.
-func rawIDToString(id interface{}) string {
-	if id == nil {
-		return ""
-	}
-	switch v := id.(type) {
-	case bson.ObjectID:
-		return v.Hex()
-	case string:
-		return v
-	case bson.Binary:
-		// UUID stored as BSON Binary (subtype 3 = old UUID, subtype 4 = UUID RFC 4122)
-		if (v.Subtype == 3 || v.Subtype == 4) && len(v.Data) == 16 {
-			b := v.Data
-			return fmt.Sprintf("%s-%s-%s-%s-%s",
-				hex.EncodeToString(b[0:4]),
-				hex.EncodeToString(b[4:6]),
-				hex.EncodeToString(b[6:8]),
-				hex.EncodeToString(b[8:10]),
-				hex.EncodeToString(b[10:16]))
-		}
-		return hex.EncodeToString(v.Data)
-	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
-
-// parseIDToFilter builds a MongoDB _id filter from a string ID.
-// Handles ObjectID hex strings, UUID strings (8-4-4-4-12 format), and plain strings.
-func parseIDToFilter(id string) bson.D {
-	// Try as ObjectID hex (exactly 24 hex chars)
-	if oid, err := bson.ObjectIDFromHex(id); err == nil {
-		return bson.D{{Key: "_id", Value: oid}}
-	}
-	// Try as UUID string (8-4-4-4-12 hex format → Binary subtype 4)
-	parts := strings.Split(id, "-")
-	if len(parts) == 5 {
-		hexStr := strings.Join(parts, "")
-		if b, err := hex.DecodeString(hexStr); err == nil && len(b) == 16 {
-			return bson.D{{Key: "_id", Value: bson.Binary{Subtype: 0x04, Data: b}}}
-		}
-	}
-	// Fallback: string _id
-	return bson.D{{Key: "_id", Value: id}}
 }
 
 // UsuarioRepository implements portout.UsuarioRepository using MongoDB.
