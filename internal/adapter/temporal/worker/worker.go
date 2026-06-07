@@ -35,6 +35,13 @@ func (r *Registry) RegisterReconciliationWorker(acts *temporalactivity.PaymentAc
 	w.RegisterActivity(acts)
 }
 
+// RegisterSandboxWorker registers the SandboxWorkflow POC on SANDBOX_QUEUE.
+func (r *Registry) RegisterSandboxWorker(act *temporalactivity.SandboxActivity) {
+	w := r.NewWorker("SANDBOX_QUEUE", sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.SandboxWorkflow)
+	w.RegisterActivity(act)
+}
+
 // OverdueInstallmentQueue is the Temporal task queue for overdue installment workers.
 const OverdueInstallmentQueue = "OVERDUE_INSTALLMENT_QUEUE"
 

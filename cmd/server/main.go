@@ -448,6 +448,7 @@ func main() {
 		temporalRegistry := temporalworker.NewRegistry(temporalClient)
 		temporalRegistry.RegisterPaymentWorker(paymentActs)
 		temporalRegistry.RegisterReconciliationWorker(paymentActs)
+		temporalRegistry.RegisterSandboxWorker(temporalactivity.NewSandboxActivity())
 
 		findMarkUC := ucpayment.NewFindAndMarkOverdueInstallments()
 		dispatchUC := ucnotification.NewDispatchOverdueNotifications()
