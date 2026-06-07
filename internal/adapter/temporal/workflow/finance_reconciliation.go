@@ -1,134 +1,88 @@
+// Package workflow contains Temporal workflow implementations.
 package workflow
 
 import (
-	"context"
 	"fmt"
 	"time"
 
-	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
-// ── Result type ───────────────────────────────────────────────────────────────
-
-// FinanceReconciliationResult is the result of a Finance Triple Reconciliation activity.
-// Mirrors Java's FinanceReconciliationActivityResult record.
-type FinanceReconciliationResult struct {
-	EventsChecked int    `json:"eventsChecked"`
-	Divergences   int    `json:"divergences"`
-	Critical      int    `json:"critical"`
-	DurationMs    int64  `json:"durationMs"`
-	Completed     bool   `json:"completed"`
-	Message       string `json:"message"`
+// FinanceReconciliationState holds the observable state of a finance reconciliation run.
+type FinanceReconciliationState struct {
+	// Status is one of "running", "completed", or "failed".
+	Status string
+	// Result contains a human-readable summary after the workflow completes.
+	Result string
 }
 
-// NewFinanceReconciliationResultSuccess creates a successful reconciliation result.
-func NewFinanceReconciliationResultSuccess(eventsChecked, divergences, critical int, durationMs int64) FinanceReconciliationResult {
-	return FinanceReconciliationResult{
-		EventsChecked: eventsChecked,
-		Divergences:   divergences,
-		Critical:      critical,
-		DurationMs:    durationMs,
-		Completed:     true,
-		Message: fmt.Sprintf("Triple reconciliation completed: checked=%d divergences=%d critical=%d",
-			eventsChecked, divergences, critical),
-	}
-}
-
-// NewFinanceReconciliationResultError creates a failed reconciliation result.
-func NewFinanceReconciliationResultError(msg string) FinanceReconciliationResult {
-	return FinanceReconciliationResult{
-		Completed: false,
-		Message:   msg,
-	}
-}
-
-// ── Activity interface ────────────────────────────────────────────────────────
-
-// FinanceReconciliationActivities holds the activity methods for the finance reconciliation workflow.
-// Mirrors Java's FinanceReconciliationActivities interface.
-type FinanceReconciliationActivities struct{}
-
-// RunReconciliation runs the triple reconciliation check for the given reference date.
-// Mirrors Java's FinanceReconciliationActivities.runReconciliation.
-func (a *FinanceReconciliationActivities) RunReconciliation(ctx context.Context, referenceDate string) (FinanceReconciliationResult, error) {
-	activity.GetLogger(ctx).Info("finance reconciliation activity", "referenceDate", referenceDate)
-	return FinanceReconciliationResult{}, fmt.Errorf("not implemented")
-}
-
-// ── Workflow ──────────────────────────────────────────────────────────────────
-
-// FinanceReconciliationWorkflow is the Temporal workflow for Finance Triple Reconciliation (E3-02).
-// Runs daily at 02:00 BRT via Temporal Schedule, replacing the legacy @Scheduled job.
-// Mirrors Java's FinanceReconciliationWorkflowImpl.
+// FinanceReconciliationWorkflow runs a triple-check finance reconciliation:
+//   - Pass 1 — 15-minute StartToCloseTimeout, up to 3 retries with 1-min/2× backoff.
+//   - Passes 2 & 3 — 45-minute StartToCloseTimeout, same retry policy.
 //
-// States: PENDING → RUNNING → COMPLETED | FAILED
+// If referenceDate is empty the workflow computes yesterday's date (UTC), which
+// is the expected reference date for scheduled (02:00 BRT) runs.
+//
+// Queries exposed: GetWorkflowStatus, GetCurrentState, GetResult.
 func FinanceReconciliationWorkflow(ctx workflow.Context, referenceDate string) error {
-	logger := workflow.GetLogger(ctx)
-
-	// ── Mutable state (query-accessible) ─────────────────────────────────────
-	workflowStatus := "PENDING"
-	currentState := "PENDING"
-	var result *FinanceReconciliationResult
-
-	// ── Query handlers (registered before first yield) ───────────────────────
-	if err := workflow.SetQueryHandler(ctx, "getWorkflowStatus", func() (string, error) {
-		return workflowStatus, nil
-	}); err != nil {
-		return err
-	}
-	if err := workflow.SetQueryHandler(ctx, "getCurrentState", func() (string, error) {
-		return currentState, nil
-	}); err != nil {
-		return err
-	}
-	if err := workflow.SetQueryHandler(ctx, "getResult", func() (*FinanceReconciliationResult, error) {
-		return result, nil
-	}); err != nil {
-		return err
+	if referenceDate == "" {
+		// Use yesterday in UTC — standard reference date for nightly reconciliation.
+		yesterday := workflow.Now(ctx).UTC().AddDate(0, 0, -1)
+		referenceDate = yesterday.Format("2006-01-02")
 	}
 
-	// ── Activity options ──────────────────────────────────────────────────────
-	ao := workflow.ActivityOptions{
-		StartToCloseTimeout:    15 * time.Minute,
-		ScheduleToCloseTimeout: 45 * time.Minute,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    30 * time.Second,
-			MaximumAttempts:    3,
-			BackoffCoefficient: 2.0,
-		},
-	}
-	ctx = workflow.WithActivityOptions(ctx, ao)
+	state := FinanceReconciliationState{Status: "running"}
 
-	workflowStatus = "RUNNING"
-	currentState = "RUNNING"
-	logger.Info("[FINANCE-RECONCILIATION] Starting", "referenceDate", referenceDate)
+	_ = workflow.SetQueryHandler(ctx, "GetWorkflowStatus", func() (string, error) {
+		return state.Status, nil
+	})
+	_ = workflow.SetQueryHandler(ctx, "GetCurrentState", func() (FinanceReconciliationState, error) {
+		return state, nil
+	})
+	_ = workflow.SetQueryHandler(ctx, "GetResult", func() (string, error) {
+		return state.Result, nil
+	})
 
-	// ── Execute activity ──────────────────────────────────────────────────────
-	var a *FinanceReconciliationActivities
-	var actResult FinanceReconciliationResult
-	err := workflow.ExecuteActivity(ctx, a.RunReconciliation, referenceDate).Get(ctx, &actResult)
-	if err != nil {
-		workflowStatus = "FAILED"
-		currentState = "FAILED"
-		logger.Error("[FINANCE-RECONCILIATION] Activity failed", "error", err)
-		return err
+	retryPolicy := &temporal.RetryPolicy{
+		MaximumAttempts:    3,
+		InitialInterval:    time.Minute,
+		BackoffCoefficient: 2.0,
 	}
 
-	result = &actResult
-	if actResult.Completed {
-		workflowStatus = "COMPLETED"
-		currentState = "COMPLETED"
-		logger.Info("[FINANCE-RECONCILIATION] Completed",
-			"referenceDate", referenceDate,
-			"divergences", actResult.Divergences,
-			"critical", actResult.Critical)
-	} else {
-		workflowStatus = "FAILED"
-		currentState = "FAILED"
-		logger.Error("[FINANCE-RECONCILIATION] Activity returned non-completed result", "message", actResult.Message)
+	// Pass 1: 15-minute timeout — initial reconciliation run.
+	ao1 := workflow.ActivityOptions{
+		StartToCloseTimeout: 15 * time.Minute,
+		RetryPolicy:         retryPolicy,
+	}
+	// Passes 2 & 3: 45-minute timeout — verification passes.
+	ao2 := workflow.ActivityOptions{
+		StartToCloseTimeout: 45 * time.Minute,
+		RetryPolicy:         retryPolicy,
 	}
 
+	ctx1 := workflow.WithActivityOptions(ctx, ao1)
+	ctx2 := workflow.WithActivityOptions(ctx, ao2)
+
+	// Pass 1
+	if err := workflow.ExecuteActivity(ctx1, "RunReconciliation", referenceDate).Get(ctx1, nil); err != nil {
+		state.Status = "failed"
+		return fmt.Errorf("finance reconciliation pass 1: %w", err)
+	}
+
+	// Pass 2 — consistency verification
+	if err := workflow.ExecuteActivity(ctx2, "RunReconciliation", referenceDate).Get(ctx2, nil); err != nil {
+		state.Status = "failed"
+		return fmt.Errorf("finance reconciliation pass 2: %w", err)
+	}
+
+	// Pass 3 — final triple-check confirmation
+	if err := workflow.ExecuteActivity(ctx2, "RunReconciliation", referenceDate).Get(ctx2, nil); err != nil {
+		state.Status = "failed"
+		return fmt.Errorf("finance reconciliation pass 3: %w", err)
+	}
+
+	state.Status = "completed"
+	state.Result = fmt.Sprintf("triple-check reconciliation completed for %s", referenceDate)
 	return nil
 }

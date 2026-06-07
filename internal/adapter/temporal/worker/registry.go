@@ -29,12 +29,9 @@ func (r *Registry) NewWorker(taskQueue string, opts sdkworker.Options) sdkworker
 }
 
 // Start starts all registered workers. Workers begin polling their task queues.
-// This MUST be called before the HTTP server starts listening so that Temporal
-// workflows are ready to accept tasks from the moment the process is healthy.
 func (r *Registry) Start() error {
 	for i, w := range r.workers {
 		if err := w.Start(); err != nil {
-			// Stop already-started workers to avoid dangling goroutines.
 			for j := 0; j < i; j++ {
 				r.workers[j].Stop()
 			}
@@ -44,10 +41,8 @@ func (r *Registry) Start() error {
 	return nil
 }
 
-// Stop stops all registered workers gracefully, waiting for in-progress activities
-// and workflows to complete.
+// Stop stops all registered workers gracefully.
 func (r *Registry) Stop() {
-	// Stop in reverse order for clean shutdown.
 	for i := len(r.workers) - 1; i >= 0; i-- {
 		r.workers[i].Stop()
 	}

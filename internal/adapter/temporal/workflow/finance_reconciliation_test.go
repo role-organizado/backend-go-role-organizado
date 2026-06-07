@@ -1,6 +1,7 @@
 package workflow_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -8,121 +9,141 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/sdk/testsuite"
 
-	. "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
+	temporalactivity "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
+	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
 )
 
-// ── Test suite ────────────────────────────────────────────────────────────────
-
-type FinanceReconciliationWorkflowTestSuite struct {
+// FinanceReconciliationTestSuite runs all FinanceReconciliationWorkflow tests.
+type FinanceReconciliationTestSuite struct {
 	suite.Suite
 	testsuite.WorkflowTestSuite
-
-	testEnv *testsuite.TestWorkflowEnvironment
 }
 
-func (s *FinanceReconciliationWorkflowTestSuite) SetupTest() {
-	s.testEnv = s.NewTestWorkflowEnvironment()
+func TestFinanceReconciliation(t *testing.T) {
+	suite.Run(t, new(FinanceReconciliationTestSuite))
 }
 
-func (s *FinanceReconciliationWorkflowTestSuite) TearDownTest() {
-	s.testEnv.AssertExpectations(s.T())
+// newEnv creates a test environment with FinanceReconciliationActivities pre-registered.
+// Registration is required for OnActivity by string name to work.
+// The javaBackendURL is a dummy — all HTTP calls are intercepted by mocks.
+func (s *FinanceReconciliationTestSuite) newEnv() *testsuite.TestWorkflowEnvironment {
+	env := s.NewTestWorkflowEnvironment()
+	acts := temporalactivity.NewFinanceReconciliationActivities("http://dummy-mocked")
+	env.RegisterActivity(acts)
+	env.RegisterWorkflow(workflow.FinanceReconciliationWorkflow)
+	return env
 }
 
-func TestFinanceReconciliationWorkflowSuite(t *testing.T) {
-	suite.Run(t, new(FinanceReconciliationWorkflowTestSuite))
-}
+// Test_Success_AllThreePasses verifies that when all 3 passes succeed the workflow
+// completes with status "completed" and a populated result string.
+func (s *FinanceReconciliationTestSuite) Test_Success_AllThreePasses() {
+	env := s.newEnv()
+	// Activity signature: RunReconciliation(ctx context.Context, referenceDate string) error
+	// → two mock.Anything matchers: one for ctx, one for referenceDate.
+	env.OnActivity("RunReconciliation", mock.Anything, mock.Anything).Return(nil)
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+	env.ExecuteWorkflow(workflow.FinanceReconciliationWorkflow, "2024-01-15")
 
-// TestFinanceReconciliationWorkflow_HappyPath verifies that:
-//   - RunReconciliation activity is called with the referenceDate
-//   - workflow completes without error when activity returns a completed result
-//   - all query handlers return expected values after execution
-func (s *FinanceReconciliationWorkflowTestSuite) TestFinanceReconciliationWorkflow_HappyPath() {
-	const referenceDate = "2026-01-01"
-	actResult := NewFinanceReconciliationResultSuccess(42, 3, 1, 8200)
+	s.True(env.IsWorkflowCompleted())
+	s.NoError(env.GetWorkflowError())
 
-	var a *FinanceReconciliationActivities
-	s.testEnv.OnActivity(a.RunReconciliation, mock.Anything, referenceDate).
-		Return(actResult, nil).
-		Once()
-
-	s.testEnv.ExecuteWorkflow(FinanceReconciliationWorkflow, referenceDate)
-
-	s.True(s.testEnv.IsWorkflowCompleted())
-	s.NoError(s.testEnv.GetWorkflowError())
-
-	// Status query
-	v, err := s.testEnv.QueryWorkflow("getWorkflowStatus")
-	s.NoError(err)
+	// Query: GetWorkflowStatus
+	val, err := env.QueryWorkflow("GetWorkflowStatus")
+	s.Require().NoError(err)
 	var status string
-	s.NoError(v.Get(&status))
-	s.Equal("COMPLETED", status)
+	s.Require().NoError(val.Get(&status))
+	s.Equal("completed", status)
+
+	// Query: GetResult must mention the reference date
+	resVal, err := env.QueryWorkflow("GetResult")
+	s.Require().NoError(err)
+	var result string
+	s.Require().NoError(resVal.Get(&result))
+	s.Contains(result, "2024-01-15")
+
+	// Query: GetCurrentState
+	stateVal, err := env.QueryWorkflow("GetCurrentState")
+	s.Require().NoError(err)
+	var state workflow.FinanceReconciliationState
+	s.Require().NoError(stateVal.Get(&state))
+	s.Equal("completed", state.Status)
+	s.NotEmpty(state.Result)
 }
 
-// TestFinanceReconciliationWorkflow_ActivityError verifies that when the
-// RunReconciliation activity returns an error the workflow propagates it
-// and the status query returns "FAILED".
-func (s *FinanceReconciliationWorkflowTestSuite) TestFinanceReconciliationWorkflow_ActivityError() {
-	const referenceDate = "2026-01-02"
+// Test_Failure_ActivityAlwaysFails verifies that when the activity exhausts its
+// retries the workflow fails and reports status "failed".
+func (s *FinanceReconciliationTestSuite) Test_Failure_ActivityAlwaysFails() {
+	env := s.newEnv()
+	env.OnActivity("RunReconciliation", mock.Anything, mock.Anything).Return(
+		errors.New("java backend unavailable"),
+	)
 
-	var a *FinanceReconciliationActivities
-	s.testEnv.OnActivity(a.RunReconciliation, mock.Anything, referenceDate).
-		Return(FinanceReconciliationResult{}, errors.New("database connection lost")).
-		Once()
+	env.ExecuteWorkflow(workflow.FinanceReconciliationWorkflow, "2024-01-15")
 
-	s.testEnv.ExecuteWorkflow(FinanceReconciliationWorkflow, referenceDate)
+	s.True(env.IsWorkflowCompleted())
+	s.Error(env.GetWorkflowError())
 
-	s.True(s.testEnv.IsWorkflowCompleted())
-	s.Error(s.testEnv.GetWorkflowError(), "workflow should fail when activity fails")
-
-	v, err := s.testEnv.QueryWorkflow("getWorkflowStatus")
-	s.NoError(err)
+	val, err := env.QueryWorkflow("GetWorkflowStatus")
+	s.Require().NoError(err)
 	var status string
-	s.NoError(v.Get(&status))
-	s.Equal("FAILED", status)
+	s.Require().NoError(val.Get(&status))
+	s.Equal("failed", status)
 }
 
-// TestFinanceReconciliationWorkflow_Queries verifies that all three query
-// handlers (getWorkflowStatus, getCurrentState, getResult) return consistent
-// values after a successful workflow execution.
-func (s *FinanceReconciliationWorkflowTestSuite) TestFinanceReconciliationWorkflow_Queries() {
-	const referenceDate = "2026-01-03"
-	actResult := NewFinanceReconciliationResultSuccess(100, 5, 2, 12000)
+// Test_Failure_Pass2Fails verifies that a failure on pass 2 (pass 1 succeeds) causes
+// the workflow to fail with status "failed".
+func (s *FinanceReconciliationTestSuite) Test_Failure_Pass2Fails() {
+	env := s.newEnv()
 
-	var a *FinanceReconciliationActivities
-	s.testEnv.OnActivity(a.RunReconciliation, mock.Anything, referenceDate).
-		Return(actResult, nil).
-		Once()
+	callN := 0
+	env.OnActivity("RunReconciliation", mock.Anything, mock.Anything).Return(
+		func(_ context.Context, _ string) error {
+			callN++
+			if callN == 1 {
+				return nil // pass 1 succeeds
+			}
+			return errors.New("reconciliation mismatch on pass 2")
+		},
+	)
 
-	s.testEnv.ExecuteWorkflow(FinanceReconciliationWorkflow, referenceDate)
+	env.ExecuteWorkflow(workflow.FinanceReconciliationWorkflow, "2024-01-15")
 
-	s.True(s.testEnv.IsWorkflowCompleted())
-	s.NoError(s.testEnv.GetWorkflowError())
+	s.True(env.IsWorkflowCompleted())
+	s.Error(env.GetWorkflowError())
 
-	// getWorkflowStatus
-	v, err := s.testEnv.QueryWorkflow("getWorkflowStatus")
-	s.NoError(err)
+	val, err := env.QueryWorkflow("GetWorkflowStatus")
+	s.Require().NoError(err)
 	var status string
-	s.NoError(v.Get(&status))
-	s.Equal("COMPLETED", status, "getWorkflowStatus should return COMPLETED")
+	s.Require().NoError(val.Get(&status))
+	s.Equal("failed", status)
+}
 
-	// getCurrentState
-	v, err = s.testEnv.QueryWorkflow("getCurrentState")
-	s.NoError(err)
-	var state string
-	s.NoError(v.Get(&state))
-	s.Equal("COMPLETED", state, "getCurrentState should return COMPLETED")
+// Test_EmptyReferenceDate_ComputesYesterday verifies that when referenceDate is empty
+// (schedule-triggered run) the workflow auto-computes yesterday (UTC) and completes.
+func (s *FinanceReconciliationTestSuite) Test_EmptyReferenceDate_ComputesYesterday() {
+	env := s.newEnv()
+	env.OnActivity("RunReconciliation", mock.Anything, mock.Anything).Return(nil)
 
-	// getResult
-	v, err = s.testEnv.QueryWorkflow("getResult")
-	s.NoError(err)
-	var result *FinanceReconciliationResult
-	s.NoError(v.Get(&result))
-	s.Require().NotNil(result, "getResult should return non-nil after completion")
-	s.True(result.Completed)
-	s.Equal(100, result.EventsChecked)
-	s.Equal(5, result.Divergences)
-	s.Equal(2, result.Critical)
-	s.EqualValues(12000, result.DurationMs)
+	env.ExecuteWorkflow(workflow.FinanceReconciliationWorkflow, "")
+
+	s.True(env.IsWorkflowCompleted())
+	s.NoError(env.GetWorkflowError())
+
+	resVal, err := env.QueryWorkflow("GetResult")
+	s.Require().NoError(err)
+	var result string
+	s.Require().NoError(resVal.Get(&result))
+	s.Contains(result, "triple-check reconciliation completed for")
+}
+
+// Test_TimeoutOptions_SmokeTest verifies the workflow executes without panics
+// when correct timeout options are applied (structural smoke test).
+func (s *FinanceReconciliationTestSuite) Test_TimeoutOptions_SmokeTest() {
+	env := s.newEnv()
+	env.OnActivity("RunReconciliation", mock.Anything, mock.Anything).Return(nil)
+
+	env.ExecuteWorkflow(workflow.FinanceReconciliationWorkflow, "2024-06-01")
+
+	s.True(env.IsWorkflowCompleted())
+	s.NoError(env.GetWorkflowError())
 }

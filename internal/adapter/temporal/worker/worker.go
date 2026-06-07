@@ -34,3 +34,30 @@ func (r *Registry) RegisterReconciliationWorker(acts *temporalactivity.PaymentAc
 	// Activities
 	w.RegisterActivity(acts)
 }
+
+// RegisterSandboxWorker registers the SandboxWorkflow POC on SANDBOX_QUEUE.
+func (r *Registry) RegisterSandboxWorker(act *temporalactivity.SandboxActivity) {
+	w := r.NewWorker("SANDBOX_QUEUE", sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.SandboxWorkflow)
+	w.RegisterActivity(act)
+}
+
+// RegisterPricingPspReviewWorker registers the PricingPspReview workflow and activity
+// on the PRICING_PSP_REVIEW_QUEUE task queue.
+func (r *Registry) RegisterPricingPspReviewWorker(act *temporalactivity.PricingPspReviewActivity) {
+	w := r.NewWorker("PRICING_PSP_REVIEW_QUEUE", sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.PricingPspReviewWorkflow)
+	w.RegisterActivity(act)
+}
+
+// FinanceReconciliationQueue is the Temporal task queue for finance reconciliation workers.
+const FinanceReconciliationQueue = "FINANCE_RECONCILIATION_QUEUE"
+
+// RegisterFinanceReconciliationWorker registers the FinanceReconciliation workflow and
+// creates its activities backed by the Java backend URL (Strangler Fig bridge).
+func (r *Registry) RegisterFinanceReconciliationWorker(javaBackendURL string) {
+	activities := temporalactivity.NewFinanceReconciliationActivities(javaBackendURL)
+	w := r.NewWorker(FinanceReconciliationQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.FinanceReconciliationWorkflow)
+	w.RegisterActivity(activities)
+}
