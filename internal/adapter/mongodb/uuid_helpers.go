@@ -78,6 +78,11 @@ func parseIDToFilter(id string) bson.D {
 	return bson.D{{Key: "_id", Value: id}}
 }
 
+// uuidStringToBinary is the unexported alias used by adapter files internally.
+func uuidStringToBinary(s string) bson.Binary {
+	return UUIDStringToBinary(s)
+}
+
 // uuidBinaryToString converts a bson.Binary (subtype 3 or 4) to a UUID string.
 func uuidBinaryToString(b bson.Binary) string {
 	if len(b.Data) != 16 {
