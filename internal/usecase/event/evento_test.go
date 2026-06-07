@@ -25,6 +25,19 @@ func (m *mockParticipanteRepo) SaveOrganizador(ctx context.Context, eventoID, us
 	return args.Error(0)
 }
 
+func (m *mockParticipanteRepo) FindParticipationIDsByUserID(ctx context.Context, userID string) ([]string, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
+}
+
+func (m *mockParticipanteRepo) IsParticipantOfEvent(ctx context.Context, eventID, userID string) (bool, error) {
+	args := m.Called(ctx, eventID, userID)
+	return args.Bool(0), args.Error(1)
+}
+
 type mockEventoRepo struct{ mock.Mock }
 
 func (m *mockEventoRepo) FindByID(ctx context.Context, id string) (*domain.Evento, error) {
