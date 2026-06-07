@@ -50,6 +50,18 @@ func (r *Registry) RegisterPricingPspReviewWorker(act *temporalactivity.PricingP
 	w.RegisterActivity(act)
 }
 
+// FinanceReconciliationQueue is the Temporal task queue for finance reconciliation workers.
+const FinanceReconciliationQueue = "FINANCE_RECONCILIATION_QUEUE"
+
+// RegisterFinanceReconciliationWorker registers the FinanceReconciliation workflow and
+// creates its activities backed by the Java backend URL (Strangler Fig bridge).
+func (r *Registry) RegisterFinanceReconciliationWorker(javaBackendURL string) {
+	activities := temporalactivity.NewFinanceReconciliationActivities(javaBackendURL)
+	w := r.NewWorker(FinanceReconciliationQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.FinanceReconciliationWorkflow)
+	w.RegisterActivity(activities)
+}
+
 // OverdueInstallmentQueue is the Temporal task queue for overdue installment workers.
 const OverdueInstallmentQueue = "OVERDUE_INSTALLMENT_QUEUE"
 

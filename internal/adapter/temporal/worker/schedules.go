@@ -93,6 +93,40 @@ func (r *Registry) InitPricingPspReviewSchedule(ctx context.Context) error {
 	return nil
 }
 
+// InitFinanceReconciliationSchedule creates the daily finance reconciliation schedule.
+// Cron: "0 5 * * *" (02:00 BRT = 05:00 UTC). Idempotent — skips if already exists.
+func InitFinanceReconciliationSchedule(ctx context.Context, c client.Client) error {
+	const scheduleID = "finance-reconciliation-daily-workflow"
+
+	_, err := c.ScheduleClient().Create(ctx, client.ScheduleOptions{
+		ID: scheduleID,
+		Spec: client.ScheduleSpec{
+			CronExpressions: []string{"0 5 * * *"},
+		},
+		Action: &client.ScheduleWorkflowAction{
+			ID:        "finance-reconciliation-daily",
+			Workflow:  temporalworkflow.FinanceReconciliationWorkflow,
+			TaskQueue: FinanceReconciliationQueue,
+			Args:      []any{""},
+		},
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "already") {
+			slog.Info("temporal schedule already exists, skipping creation",
+				"scheduleID", scheduleID)
+			return nil
+		}
+		return fmt.Errorf("create finance reconciliation schedule %q: %w", scheduleID, err)
+	}
+
+	slog.Info("temporal schedule created",
+		"scheduleID", scheduleID,
+		"cron", "0 5 * * *",
+		"queue", FinanceReconciliationQueue,
+	)
+	return nil
+}
+
 // InitOverdueInstallmentSchedule creates the daily overdue installment schedule.
 // Fires at 06:00 UTC (03:00 BRT). Idempotent — skips if already exists.
 func InitOverdueInstallmentSchedule(ctx context.Context, c client.Client) error {

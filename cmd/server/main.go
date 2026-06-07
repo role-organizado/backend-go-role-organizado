@@ -451,6 +451,7 @@ func main() {
 		temporalRegistry.RegisterPaymentWorker(paymentActs)
 		temporalRegistry.RegisterReconciliationWorker(paymentActs)
 		temporalRegistry.RegisterSandboxWorker(temporalactivity.NewSandboxActivity())
+		temporalRegistry.RegisterFinanceReconciliationWorker(cfg.Server.JavaBackendURL)
 
 		pspReviewUC := ucpricing.NewRunPspCostReview(cfg, &http.Client{Timeout: 5 * time.Minute})
 		pspReviewActivity := temporalactivity.NewPricingPspReviewActivity(pspReviewUC)
@@ -471,6 +472,9 @@ func main() {
 		defer schedCancel()
 		if schedErr := temporalRegistry.InitPricingPspReviewSchedule(schedCtx); schedErr != nil {
 			slog.Warn("temporal: failed to init pricing-psp-review schedule", "error", schedErr)
+		}
+		if schedErr := temporalworker.InitFinanceReconciliationSchedule(schedCtx, temporalClient); schedErr != nil {
+			slog.Warn("finance reconciliation schedule init failed", "error", schedErr)
 		}
 		if schedErr := temporalworker.InitOverdueInstallmentSchedule(schedCtx, temporalClient); schedErr != nil {
 			slog.Warn("overdue-installment schedule init failed", "error", schedErr)
