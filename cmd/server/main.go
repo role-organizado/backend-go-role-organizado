@@ -46,6 +46,8 @@ import (
 	uccofrinho "github.com/role-organizado/backend-go-role-organizado/internal/usecase/cofrinho"
 	// Lista Presentes
 	uclistapresentes "github.com/role-organizado/backend-go-role-organizado/internal/usecase/listapresentes"
+	// Social Features
+	ucsocial "github.com/role-organizado/backend-go-role-organizado/internal/usecase/social"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -124,6 +126,10 @@ func main() {
 	}
 	if err := migrations.RunV083CreateListaPresentesCollection(ctx, mongoClient.DB()); err != nil {
 		slog.Error("migration v083 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV084CreateSocialFeaturesIndexes(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v084 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -305,6 +311,40 @@ func main() {
 	removeItemUC := uclistapresentes.NewRemoveItem(listaPresentesRepo)
 	listaPresentesHandler := handler.NewListaPresentesHandler(addItemUC, getItemUC, listItemsUC, reservarItemUC, removeItemUC)
 
+	// --- Social Features domain ---
+	socialRepo := mongodb.NewSocialFeaturesRepository(mongoClient)
+	eventoAuthPort := mongodb.NewEventoAuthAdapter(mongoClient)
+	getSocialFeaturesUC := ucsocial.NewGetSocialFeatures(socialRepo, eventoAuthPort)
+	setDressCodeUC := ucsocial.NewSetDressCode(socialRepo, eventoAuthPort)
+	removeDressCodeUC := ucsocial.NewRemoveDressCode(socialRepo, eventoAuthPort)
+	addPlaylistUC := ucsocial.NewAddPlaylist(socialRepo, eventoAuthPort)
+	removePlaylistUC := ucsocial.NewRemovePlaylist(socialRepo, eventoAuthPort)
+	addBringListItemUC := ucsocial.NewAddBringListItem(socialRepo, eventoAuthPort)
+	updateBringListItemUC := ucsocial.NewUpdateBringListItem(socialRepo, eventoAuthPort)
+	removeBringListItemUC := ucsocial.NewRemoveBringListItem(socialRepo, eventoAuthPort)
+	claimBringListItemUC := ucsocial.NewClaimBringListItem(socialRepo, eventoAuthPort)
+	unclaimBringListItemUC := ucsocial.NewUnclaimBringListItem(socialRepo, eventoAuthPort)
+	setCheckinHabilitadoUC := ucsocial.NewSetCheckinHabilitado(socialRepo, eventoAuthPort)
+	doCheckinUC := ucsocial.NewDoCheckin(socialRepo, eventoAuthPort)
+	addAlbumLinkUC := ucsocial.NewAddAlbumLink(socialRepo, eventoAuthPort)
+	removeAlbumLinkUC := ucsocial.NewRemoveAlbumLink(socialRepo, eventoAuthPort)
+	socialHandler := handler.NewSocialHandler(
+		getSocialFeaturesUC,
+		setDressCodeUC,
+		removeDressCodeUC,
+		addPlaylistUC,
+		removePlaylistUC,
+		addBringListItemUC,
+		updateBringListItemUC,
+		removeBringListItemUC,
+		claimBringListItemUC,
+		unclaimBringListItemUC,
+		setCheckinHabilitadoUC,
+		doCheckinUC,
+		addAlbumLinkUC,
+		removeAlbumLinkUC,
+	)
+
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
@@ -353,6 +393,7 @@ func main() {
 		workflowProxyHandler.RegisterWorkflowRoutes(r)
 		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 		listaPresentesHandler.RegisterListaPresentesRoutes(r)
+		socialHandler.RegisterSocialRoutes(r)
 		financeHandler.RegisterFinanceRoutes(r)
 		adminHandler.RegisterAdminRoutes(r)
 		participantesHandler.RegisterParticipantesRoutes(r)

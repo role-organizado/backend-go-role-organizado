@@ -4,6 +4,9 @@ package mongodb_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -370,4 +373,174 @@ func TestSocialFeaturesRepository_AddAndRemoveAlbumLink(t *testing.T) {
 	// Second remove is a no-op.
 	err = repo.RemoveAlbumLink(ctx, socialTestEvento1, "album-001")
 	require.NoError(t, err)
+}
+
+// ============================================================
+// Concurrent / atomicidade tests (AC-4, AC-9, AC-12)
+// ============================================================
+
+// Unique evento IDs reserved for concurrency tests.
+// Each test function calls testhelper.StartMongo(t) which creates an isolated
+// MongoDB container, so collisions with other test functions are impossible.
+const (
+	socialConcurrentClaimEvento   = "cc000001-0000-0000-0000-000000000001"
+	socialConcurrentCheckinEvento = "cc000002-0000-0000-0000-000000000002"
+	socialConcurrentCreateEvento  = "cc000003-0000-0000-0000-000000000003"
+)
+
+// TestSocialFeaturesRepository_ClaimBringListItem_Concurrent — AC-4
+//
+// Two goroutines concurrently claim the same bring-list item.
+// Exactly one must succeed; the other must receive BRING_LIST_ITEM_ALREADY_CLAIMED.
+// The winning claimer's data must be preserved in the database.
+func TestSocialFeaturesRepository_ClaimBringListItem_Concurrent(t *testing.T) {
+	client := testhelper.StartMongo(t)
+	repo := mongodb.NewSocialFeaturesRepository(client)
+	ctx := context.Background()
+
+	const itemID = "item-concurrent-carvao"
+
+	_, err := repo.FindOrCreate(ctx, socialConcurrentClaimEvento)
+	require.NoError(t, err)
+
+	err = repo.AddBringListItem(ctx, socialConcurrentClaimEvento, social.BringListItem{
+		ID:         itemID,
+		Nome:       "Carvão Concorrente",
+		Quantidade: "5kg",
+	})
+	require.NoError(t, err)
+
+	// Two goroutines race to claim the same item.
+	const concurrency = 2
+	errs := make([]error, concurrency)
+	var wg sync.WaitGroup
+	for i := range concurrency {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			uid := fmt.Sprintf("user-claim-%02d", idx)
+			errs[idx] = repo.ClaimBringListItem(
+				ctx, socialConcurrentClaimEvento, itemID,
+				uid, fmt.Sprintf("User %d", idx), time.Now(),
+			)
+		}(i)
+	}
+	wg.Wait()
+
+	successes, conflicts := 0, 0
+	for _, e := range errs {
+		switch {
+		case e == nil:
+			successes++
+		case strings.Contains(e.Error(), "BRING_LIST_ITEM_ALREADY_CLAIMED"):
+			conflicts++
+		default:
+			t.Errorf("unexpected error from concurrent claim: %v", e)
+		}
+	}
+	assert.Equal(t, 1, successes, "exactly one goroutine must claim successfully (AC-4)")
+	assert.Equal(t, 1, conflicts, "exactly one goroutine must get BRING_LIST_ITEM_ALREADY_CLAIMED (AC-4)")
+
+	// Confirm the winning claimer's ID was persisted and not overwritten.
+	sf, err := repo.FindByEventoID(ctx, socialConcurrentClaimEvento)
+	require.NoError(t, err)
+	require.Len(t, sf.BringList, 1)
+	assert.NotEmpty(t, sf.BringList[0].ClaimedBy, "item must have exactly one claimer after race (AC-4)")
+}
+
+// TestSocialFeaturesRepository_AddCheckin_Concurrent — AC-9
+//
+// Two goroutines concurrently perform check-in for the same user.
+// Exactly one must succeed; the other must receive CHECKIN_ALREADY_REGISTERED.
+// Only one check-in record must be stored in the database.
+func TestSocialFeaturesRepository_AddCheckin_Concurrent(t *testing.T) {
+	client := testhelper.StartMongo(t)
+	repo := mongodb.NewSocialFeaturesRepository(client)
+	ctx := context.Background()
+
+	_, err := repo.FindOrCreate(ctx, socialConcurrentCheckinEvento)
+	require.NoError(t, err)
+
+	// Both goroutines use the exact same user ID to simulate duplicate check-in.
+	const sharedUserID = "user-checkin-concurrent-shared"
+	checkin := social.Checkin{
+		UsuarioID: sharedUserID,
+		Nome:      "Usuário Concorrente",
+		Timestamp: time.Now(),
+	}
+
+	const concurrency = 2
+	errs := make([]error, concurrency)
+	var wg sync.WaitGroup
+	for i := range concurrency {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = repo.AddCheckin(ctx, socialConcurrentCheckinEvento, checkin)
+		}(i)
+	}
+	wg.Wait()
+
+	successes, conflicts := 0, 0
+	for _, e := range errs {
+		switch {
+		case e == nil:
+			successes++
+		case strings.Contains(e.Error(), "CHECKIN_ALREADY_REGISTERED"):
+			conflicts++
+		default:
+			t.Errorf("unexpected error from concurrent checkin: %v", e)
+		}
+	}
+	assert.Equal(t, 1, successes, "exactly one goroutine must check in successfully (AC-9)")
+	assert.Equal(t, 1, conflicts, "exactly one goroutine must get CHECKIN_ALREADY_REGISTERED (AC-9)")
+
+	// Verify only one check-in record was stored, not two.
+	sf, err := repo.FindByEventoID(ctx, socialConcurrentCheckinEvento)
+	require.NoError(t, err)
+	assert.Len(t, sf.Checkins, 1, "only one check-in must exist despite concurrent attempts (AC-9)")
+}
+
+// TestSocialFeaturesRepository_FindOrCreate_Concurrent — AC-12
+//
+// N goroutines concurrently call FindOrCreate for the same eventoId.
+// All calls must succeed without error, and all must return the same document ID
+// (the unique index on eventoId ensures exactly one document is ever created).
+func TestSocialFeaturesRepository_FindOrCreate_Concurrent(t *testing.T) {
+	client := testhelper.StartMongo(t)
+	repo := mongodb.NewSocialFeaturesRepository(client)
+	ctx := context.Background()
+
+	const concurrency = 8
+	results := make([]*social.EventoSocialFeatures, concurrency)
+	errs := make([]error, concurrency)
+
+	var wg sync.WaitGroup
+	for i := range concurrency {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = repo.FindOrCreate(ctx, socialConcurrentCreateEvento)
+		}(i)
+	}
+	wg.Wait()
+
+	// All goroutines must have succeeded with no error.
+	for i, e := range errs {
+		require.NoError(t, e, "FindOrCreate goroutine %d returned unexpected error (AC-12)", i)
+	}
+
+	// All goroutines must have received the same document (same _id).
+	// This proves exactly one document was created despite N concurrent calls.
+	var firstID string
+	for i, r := range results {
+		require.NotNil(t, r, "FindOrCreate goroutine %d returned nil (AC-12)", i)
+		assert.Equal(t, socialConcurrentCreateEvento, r.EventoID)
+		if firstID == "" {
+			firstID = r.ID
+		} else {
+			assert.Equal(t, firstID, r.ID,
+				"goroutine %d got a different document ID — FindOrCreate is not idempotent under concurrency (AC-12)", i)
+		}
+	}
 }

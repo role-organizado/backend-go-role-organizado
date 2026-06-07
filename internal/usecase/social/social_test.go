@@ -464,6 +464,23 @@ func TestAddPlaylist_Execute(t *testing.T) {
 			wantProv: domain.PlaylistOther,
 		},
 		{
+			// AC-16: YouTube provider detected, embedUrl gerado corretamente.
+			name: "success — youtube URL — AC-16",
+			in:   portin.AddPlaylistInput{EventoID: evtID, UsuarioID: userID, URL: "https://www.youtube.com/playlist?list=PLxyz123ABC", Nome: "YouTube Mix"},
+			setupAuth: func(a *mockAuthPort) {
+				a.On("FaseAtLeast", ctx, evtID, domain.FaseAguardandoAceite).Return(nil)
+				a.On("IsOrganizador", ctx, evtID, userID).Return(true, nil)
+			},
+			setupRepo: func(r *mockSocialRepo) {
+				r.On("FindOrCreate", ctx, evtID).Return(emptyDoc(), nil)
+				r.On("AddPlaylist", ctx, evtID, mock.MatchedBy(func(p domain.PlaylistLink) bool {
+					// Provider deve ser YOUTUBE e embedUrl deve ser preenchido.
+					return p.Provider == domain.PlaylistYouTube && p.ID != "" && p.EmbedURL != ""
+				})).Return(nil)
+			},
+			wantProv: domain.PlaylistYouTube,
+		},
+		{
 			name: "max playlists reached — returns 400",
 			in:   portin.AddPlaylistInput{EventoID: evtID, UsuarioID: userID, URL: "https://x.com", Nome: "X"},
 			setupAuth: func(a *mockAuthPort) {
