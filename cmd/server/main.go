@@ -36,6 +36,9 @@ import (
 	ucrateio "github.com/role-organizado/backend-go-role-organizado/internal/usecase/rateio"
 	// Phase 5
 	ucpayment "github.com/role-organizado/backend-go-role-organizado/internal/usecase/payment"
+	ucasaas "github.com/role-organizado/backend-go-role-organizado/internal/infra/asaas"
+	paymentdomain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
+	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 	// Phase 6
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
 	// Phase 6b: Notification Templates
@@ -248,6 +251,37 @@ func main() {
 	upsertCfgPayUC := ucpayment.NewUpsertConfigPagamento(configPagRepo)
 	getCfgPayUC := ucpayment.NewGetConfigPagamento(configPagRepo)
 
+	// Payment provider (Asaas real vs mock, controlled by ROLE_ASAAS_USE_MOCK).
+	var paymentProvider portout.PaymentProvider
+	var providerName paymentdomain.PaymentProvider
+	if cfg.Asaas.UseMock {
+		paymentProvider = ucasaas.NewMockProvider()
+		providerName = paymentdomain.PaymentProviderMock
+	} else {
+		paymentProvider = ucasaas.NewClient(cfg.Asaas)
+		providerName = paymentdomain.PaymentProviderAsaas
+	}
+
+	// Real-payment repos.
+	txRepo := mongodb.NewPaymentTransactionRepository(mongoClient)
+	customerLinkRepo := mongodb.NewAsaasCustomerLinkRepository(mongoClient)
+	savedCardRepo := mongodb.NewSavedCreditCardRepository(mongoClient)
+
+	// Fee policy snapshot + subledger dual-write services.
+	feePolicySvc := ucpayment.NewFeePolicyService(mongoClient.Collection("evento_config_pagamentos"))
+	subledgerSvc := ucpayment.NewSubledgerDualWriteService(
+		mongoClient.Collection("ledger_entries"),
+		mongoClient.Collection("ledger_snapshot_events"),
+	)
+
+	// ProcessPayment / GetTransaction / ListUserPayments use cases.
+	processPaymentUC := ucpayment.NewProcessPayment(
+		txRepo, customerLinkRepo, usuarioRepo, savedCardRepo,
+		paymentProvider, providerName, feePolicySvc, subledgerSvc,
+	)
+	getTransactionUC := ucpayment.NewGetPaymentTransaction(txRepo)
+	listUserPaymentsUC := ucpayment.NewListUserPayments(txRepo)
+
 	listUserInstallmentsUC := ucpayment.NewListUserInstallments(installmentRepo, participanteRepo, eventoRepo)
 	listInstallmentsUC := ucpayment.NewListInstallments(installmentRepo, participanteRepo)
 	getInstallmentUC := ucpayment.NewGetInstallment(installmentRepo, participanteRepo)
@@ -256,6 +290,7 @@ func main() {
 	paymentHandler := handler.NewPaymentHandler(
 		createPayUC, getPayUC, listPayUC, updatePayUC, deletePayUC,
 		confirmarPayUC, upsertCfgPayUC, getCfgPayUC,
+		processPaymentUC, getTransactionUC, listUserPaymentsUC, paymentProvider,
 	)
 	installmentHandler := handler.NewInstallmentHandler(
 		listUserInstallmentsUC, listInstallmentsUC, getInstallmentUC, cancelInstallmentsUC,
@@ -321,6 +356,16 @@ func main() {
 	// --- Phase 8: Temporal Workflow Proxies ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
+	// --- Phase 5b: Payment Methods + PIX validate + Saved Cards (hexagonal) ---
+	// savedCardRepo is reused from Phase 5 (already declared above).
+	paymentAccountRepo := mongodb.NewPaymentAccountRepository(mongoClient)
+
+	manageAccountsUC := ucpayment.NewManagePaymentAccounts(paymentAccountRepo)
+	validatePixUC := ucpayment.NewValidatePixKey()
+	manageSavedCardsUC := ucpayment.NewManageSavedCards(savedCardRepo)
+
+	paymentMethodsHandler := handler.NewPaymentMethodsHandler(manageAccountsUC, validatePixUC, manageSavedCardsUC)
+
 	// --- Finance, Admin, Participantes handlers (direct MongoDB) ---
 	financeHandler := handler.NewFinanceHandler(mongoClient)
 	adminHandler := handler.NewAdminHandler(mongoClient)
@@ -367,6 +412,7 @@ func main() {
 		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 		listaPresentesHandler.RegisterListaPresentesRoutes(r)
 		financeHandler.RegisterFinanceRoutes(r)
+		paymentMethodsHandler.RegisterPaymentMethodsRoutes(r)
 		installmentHandler.RegisterInstallmentRoutes(r)
 		adminHandler.RegisterAdminRoutes(r)
 		participantesHandler.RegisterParticipantesRoutes(r)

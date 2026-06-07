@@ -71,27 +71,14 @@ func NewFinanceHandler(mongo *mongodb.Client) *FinanceHandler {
 	return &FinanceHandler{mongo: mongo}
 }
 
-// RegisterFinanceRoutes registers all finance routes.
+// RegisterFinanceRoutes registers finance overview routes.
+// Payment methods (/api/v1/payment-methods) and saved cards (/api/v1/saved-cards)
+// are now handled by PaymentMethodsHandler (hexagonal use-case layer).
 func (h *FinanceHandler) RegisterFinanceRoutes(r chi.Router) {
 	// Finance overview
 	r.Get("/api/v1/finance", h.ListFinanceEvents)
 	r.Get("/api/v1/finance/{eventId}", h.GetFinanceOverview)
 	r.Post("/api/v1/finance/{eventId}/send-reminders", h.SendReminders)
-
-	// Payment methods (PIX/Banco)
-	r.Get("/api/v1/payment-methods", h.ListPaymentAccounts)
-	r.Post("/api/v1/payment-methods", h.CreatePaymentAccount)
-	r.Put("/api/v1/payment-methods/{accountId}", h.UpdatePaymentAccount)
-	r.Post("/api/v1/payment-methods/{accountId}/set-default", h.SetDefaultAccount)
-	r.Delete("/api/v1/payment-methods/{accountId}", h.DeletePaymentAccount)
-
-	// Saved credit cards
-	r.Get("/api/v1/saved-cards", h.ListSavedCards)
-	r.Post("/api/v1/saved-cards", h.CreateSavedCard)
-	r.Get("/api/v1/saved-cards/{cardId}", h.GetSavedCard)
-	r.Delete("/api/v1/saved-cards/{cardId}", h.DeleteSavedCard)
-	r.Post("/api/v1/saved-cards/{cardId}/set-default", h.SetDefaultSavedCard)
-
 }
 
 // ---- finance_summaries ----
