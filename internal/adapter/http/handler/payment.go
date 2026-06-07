@@ -43,6 +43,9 @@ type PaymentHandler struct {
 	getTransactionUC      portin.GetPaymentTransactionUseCase
 	listUserPaymentsUC    portin.ListUserPaymentsUseCase
 	provider              portout.PaymentProvider // used by sandbox-simulate
+
+	// ── Admin: fee policy reapplication ─────────────────────────────────────────
+	reaplicarFeeUC portin.ReaplicarFeePolicyNasConfigsUseCase
 }
 
 // NewPaymentHandler creates a PaymentHandler with all use cases wired in.
@@ -60,6 +63,7 @@ func NewPaymentHandler(
 	getTransaction portin.GetPaymentTransactionUseCase,
 	listUserPayments portin.ListUserPaymentsUseCase,
 	provider portout.PaymentProvider,
+	reaplicarFee portin.ReaplicarFeePolicyNasConfigsUseCase,
 ) *PaymentHandler {
 	return &PaymentHandler{
 		createUC:              create,
@@ -75,6 +79,7 @@ func NewPaymentHandler(
 		getTransactionUC:      getTransaction,
 		listUserPaymentsUC:    listUserPayments,
 		provider:              provider,
+		reaplicarFeeUC:        reaplicarFee,
 	}
 }
 
@@ -118,6 +123,10 @@ func (h *PaymentHandler) RegisterPaymentRoutes(r chi.Router) {
 	// POST /api/v1/payments/{transactionId}/sandbox-simulate — admin/moderator only
 	r.With(middleware.RequireRole("ADMIN")).Post("/api/v1/payments/{transactionId}/sandbox-simulate", h.sandboxSimulate)
 
+	// POST /api/v1/admin/payments/reaplicar-fee-policy — ADMIN only
+	// Mirrors Java ReaplicarFeePolicySnapshotUseCase endpoint.
+	r.With(middleware.RequireRole("ADMIN")).Post("/api/v1/admin/payments/reaplicar-fee-policy", h.reaplicarFeePolicy)
+
 	// PagamentoMensal list/create remain on the v1 prefix for backward compat
 	// with existing mobile clients that use /api/v1/payments (non-process).
 	r.Get("/api/v1/payments", h.listPagamentos)
@@ -153,6 +162,20 @@ type upsertConfigRequest struct {
 	PrazoPagamento   *time.Time `json:"prazoPagamento"`
 	ChavePix         string     `json:"chavePix"`
 	InstrucoesBoleto string     `json:"instrucoesBoleto"`
+
+	// Fee policy snapshot fields (gap report §6.3 — Java parity).
+	PlatformFeePercent    float64 `json:"platformFeePercent"`
+	PspFeePercent         float64 `json:"pspFeePercent"`
+	PaymentProvider       string  `json:"paymentProvider"`
+	PaymentFrequency      string  `json:"paymentFrequency"`
+	PaymentReleaseTrigger string  `json:"paymentReleaseTrigger"`
+}
+
+// reaplicarFeePolicyRequest is the body for POST /api/v1/admin/payments/reaplicar-fee-policy.
+type reaplicarFeePolicyRequest struct {
+	PlatformFeePercent float64 `json:"platformFeePercent"`
+	PspFeePercent      float64 `json:"pspFeePercent"`
+	VersionID          string  `json:"versionId,omitempty"`
 }
 
 func (h *PaymentHandler) createPagamento(w http.ResponseWriter, r *http.Request) {
@@ -278,18 +301,52 @@ func (h *PaymentHandler) upsertConfig(w http.ResponseWriter, r *http.Request) {
 		methods[i] = domain.MetodoPagamento(m)
 	}
 	cfg, err := h.upsertCfgUC.Execute(r.Context(), portin.UpsertConfigPagamentoInput{
-		EventoID:         req.EventoID,
-		UsuarioID:        userID,
-		MetodosPagamento: methods,
-		PrazoPagamento:   req.PrazoPagamento,
-		ChavePix:         req.ChavePix,
-		InstrucoesBoleto: req.InstrucoesBoleto,
+		EventoID:              req.EventoID,
+		UsuarioID:             userID,
+		MetodosPagamento:      methods,
+		PrazoPagamento:        req.PrazoPagamento,
+		ChavePix:              req.ChavePix,
+		InstrucoesBoleto:      req.InstrucoesBoleto,
+		PlatformFeePercent:    req.PlatformFeePercent,
+		PspFeePercent:         req.PspFeePercent,
+		PaymentProvider:       req.PaymentProvider,
+		PaymentFrequency:      req.PaymentFrequency,
+		PaymentReleaseTrigger: req.PaymentReleaseTrigger,
 	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
+}
+
+// reaplicarFeePolicy handles POST /api/v1/admin/payments/reaplicar-fee-policy.
+// Requires ADMIN role (enforced by RequireRole middleware in route registration).
+// Mirrors Java ReaplicarFeePolicySnapshotUseCase.
+func (h *PaymentHandler) reaplicarFeePolicy(w http.ResponseWriter, r *http.Request) {
+	requesterID := middleware.UserIDFromContext(r.Context())
+
+	var req reaplicarFeePolicyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
+		return
+	}
+
+	result, err := h.reaplicarFeeUC.Execute(r.Context(), portin.ReaplicarFeePolicyNasConfigsInput{
+		PlatformFeePercent: req.PlatformFeePercent,
+		PspFeePercent:      req.PspFeePercent,
+		VersionID:          req.VersionID,
+		RequesterID:        requesterID,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"updatedCount": result.UpdatedCount,
+		"message":      "Fee policy reapplied successfully",
+	})
 }
 
 // ─── PagamentoMensal response helpers ────────────────────────────────────────

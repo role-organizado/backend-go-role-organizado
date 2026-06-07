@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
+	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
+	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
 
 // FeePolicyResolver resolves the fee policy snapshot for a payment.
@@ -28,78 +27,60 @@ var globalPolicy = domain.FeePolicySnapshot{
 	Version:               "global-v1",
 }
 
-// eventFeeConfigRaw holds the Java-written fee fields from evento_config_pagamentos.
-// Pointer fields are nil if not present in the document — this distinguishes
-// "not set" from "set to 0".
-type eventFeeConfigRaw struct {
-	PlatformFeePercent    *float64 `bson:"platformFeePercent"`
-	PspFeePercent         *float64 `bson:"pspFeePercent"`
-	PlatformFeeFixedCents *int64   `bson:"platformFeeFixedCents"`
-	PspFeeFixedCents      *int64   `bson:"pspFeeFixedCents"`
-	FeePolicyVersion      string   `bson:"feePolicyVersion"`
-}
-
 // FeePolicyService resolves fee configuration from the shared evento_config_pagamentos
-// collection. If the document has platformFeePercent/pspFeePercent Java fields, those
-// are used. Falls back to the GLOBAL policy if the event has no custom fee configuration.
+// collection via the EventoConfigPagamentoRepository (typed domain fields).
 //
-// The collection is shared with the Java backend: Java writes camelCase keys (eventoId),
-// Go writes snake_case keys (evento_id). Both variants are queried.
+// If the document has platformFeePercent/pspFeePercent or a feePolicyVersion set,
+// those values are used. Falls back to the GLOBAL policy otherwise.
+//
+// The repository FindByEventoID queries both camelCase (eventoId — Java) and
+// snake_case (evento_id — Go) to support the shared collection.
 //
 // Implements FeePolicyResolver.
 type FeePolicyService struct {
-	col *mongo.Collection
+	repo portout.EventoConfigPagamentoRepository
 }
 
-// NewFeePolicyService creates a new FeePolicyService targeting the given collection.
-// Pass mongoClient.Collection("evento_config_pagamentos") from cmd/server/main.go.
-func NewFeePolicyService(col *mongo.Collection) *FeePolicyService {
-	return &FeePolicyService{col: col}
+// NewFeePolicyService creates a new FeePolicyService backed by the given repository.
+func NewFeePolicyService(repo portout.EventoConfigPagamentoRepository) *FeePolicyService {
+	return &FeePolicyService{repo: repo}
 }
 
-// ResolveSnapshot reads the evento_config_pagamentos collection for eventID and extracts
-// fee fields written by the Java backend. If the document is absent or lacks fee fields,
-// the GLOBAL fallback policy is returned.
+// ResolveSnapshot reads the evento_config_pagamentos collection for eventID and returns
+// a FeePolicySnapshot built from typed domain fields. If the document is absent or lacks
+// fee configuration, the GLOBAL fallback policy is returned.
 func (s *FeePolicyService) ResolveSnapshot(ctx context.Context, eventID string) (domain.FeePolicySnapshot, error) {
-	// Query both camelCase (Java) and snake_case (Go) key variants.
-	filter := bson.D{{Key: "$or", Value: bson.A{
-		bson.D{{Key: "eventoId", Value: eventID}},
-		bson.D{{Key: "evento_id", Value: eventID}},
-	}}}
-
-	var cfg eventFeeConfigRaw
-	if err := s.col.FindOne(ctx, filter).Decode(&cfg); err != nil {
-		if err == mongo.ErrNoDocuments {
+	cfg, err := s.repo.FindByEventoID(ctx, eventID)
+	if err != nil {
+		// NotFound → use global policy.
+		if ae, ok := err.(*apierr.APIError); ok && ae.Status == 404 {
 			slog.DebugContext(ctx, "fee policy: event config not found, using global", "eventID", eventID)
 			return globalPolicy, nil
 		}
 		return domain.FeePolicySnapshot{}, fmt.Errorf("fee policy: find event config for %s: %w", eventID, err)
 	}
 
-	// If neither fee percentage was set by Java, fall back to global policy.
-	if cfg.PlatformFeePercent == nil && cfg.PspFeePercent == nil {
+	// Determine whether a custom fee policy was configured.
+	// Primary discriminator: non-empty FeePolicyVersion (set by UpsertConfigPagamento
+	// or ReaplicarFeePolicySnapshotUseCase when fees were explicitly configured).
+	// Secondary: non-zero fee percents (for old Java docs without version field).
+	hasCustomPolicy := cfg.FeePolicyVersion != "" || cfg.PlatformFeePercent != 0 || cfg.PspFeePercent != 0
+
+	if !hasCustomPolicy {
 		slog.DebugContext(ctx, "fee policy: event config has no custom fees, using global", "eventID", eventID)
 		return globalPolicy, nil
 	}
 
 	snap := domain.FeePolicySnapshot{
-		FeePolicySource: "EVENT:" + eventID,
-		Version:         "event-v1",
+		FeePolicySource:       "EVENT:" + eventID,
+		PlatformFeePercent:    cfg.PlatformFeePercent,
+		PspFeePercent:         cfg.PspFeePercent,
+		PlatformFeeFixedCents: cfg.PlatformFeeFixedCents,
+		PspFeeFixedCents:      cfg.PspFeeFixedCents,
+		Version:               cfg.FeePolicyVersion,
 	}
-	if cfg.FeePolicyVersion != "" {
-		snap.Version = cfg.FeePolicyVersion
-	}
-	if cfg.PlatformFeePercent != nil {
-		snap.PlatformFeePercent = *cfg.PlatformFeePercent
-	}
-	if cfg.PspFeePercent != nil {
-		snap.PspFeePercent = *cfg.PspFeePercent
-	}
-	if cfg.PlatformFeeFixedCents != nil {
-		snap.PlatformFeeFixedCents = *cfg.PlatformFeeFixedCents
-	}
-	if cfg.PspFeeFixedCents != nil {
-		snap.PspFeeFixedCents = *cfg.PspFeeFixedCents
+	if snap.Version == "" {
+		snap.Version = "event-v1"
 	}
 
 	return snap, nil

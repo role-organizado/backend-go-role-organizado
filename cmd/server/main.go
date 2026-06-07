@@ -268,7 +268,8 @@ func main() {
 	savedCardRepo := mongodb.NewSavedCreditCardRepository(mongoClient)
 
 	// Fee policy snapshot + subledger dual-write services.
-	feePolicySvc := ucpayment.NewFeePolicyService(mongoClient.Collection("evento_config_pagamentos"))
+	// FeePolicyService now uses the typed repository (refactor: typed fields vs raw BSON).
+	feePolicySvc := ucpayment.NewFeePolicyService(configPagRepo)
 	subledgerSvc := ucpayment.NewSubledgerDualWriteService(
 		mongoClient.Collection("ledger_entries"),
 		mongoClient.Collection("ledger_snapshot_events"),
@@ -292,10 +293,13 @@ func main() {
 	getInstallmentUC := ucpayment.NewGetInstallment(installmentRepo, participanteRepo)
 	cancelInstallmentsUC := ucpayment.NewCancelParticipantInstallments(installmentRepo, participanteRepo, eventoRepo)
 
+	reaplicarFeeUC := ucpayment.NewReaplicarFeePolicySnapshot(configPagRepo)
+
 	paymentHandler := handler.NewPaymentHandler(
 		createPayUC, getPayUC, listPayUC, updatePayUC, deletePayUC,
 		confirmarPayUC, upsertCfgPayUC, getCfgPayUC,
 		processPaymentUC, processBatchPaymentUC, getTransactionUC, listUserPaymentsUC, paymentProvider,
+		reaplicarFeeUC,
 	)
 	installmentHandler := handler.NewInstallmentHandler(
 		listUserInstallmentsUC, listInstallmentsUC, getInstallmentUC, cancelInstallmentsUC,
