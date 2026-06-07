@@ -199,7 +199,7 @@ func TestFinanceLedger_SortedByOccurredAtDesc(t *testing.T) {
 
 func TestFinancePaymentAccount_SaveAndFind(t *testing.T) {
 	client := testhelper.StartMongo(t)
-	repo := mongodb.NewPaymentAccountRepository(client)
+	repo := mongodb.NewFinanceAccountRepository(client)
 	ctx := context.Background()
 
 	in := &domain.PaymentAccount{
@@ -232,7 +232,7 @@ func TestFinancePaymentAccount_SaveAndFind(t *testing.T) {
 
 func TestFinancePaymentAccount_ClearDefault(t *testing.T) {
 	client := testhelper.StartMongo(t)
-	repo := mongodb.NewPaymentAccountRepository(client)
+	repo := mongodb.NewFinanceAccountRepository(client)
 	ctx := context.Background()
 
 	// Insert 3 accounts — two with IsDefault=true
@@ -260,7 +260,7 @@ func TestFinancePaymentAccount_ClearDefault(t *testing.T) {
 
 func TestFinancePaymentAccount_SoftDelete(t *testing.T) {
 	client := testhelper.StartMongo(t)
-	repo := mongodb.NewPaymentAccountRepository(client)
+	repo := mongodb.NewFinanceAccountRepository(client)
 	ctx := context.Background()
 
 	// Use unique UUID to isolate from TestFinancePaymentAccount_ClearDefault
@@ -300,7 +300,7 @@ func TestFinancePaymentAccount_SoftDelete(t *testing.T) {
 
 func TestFinancePaymentAccount_SoftDelete_NotFound(t *testing.T) {
 	client := testhelper.StartMongo(t)
-	repo := mongodb.NewPaymentAccountRepository(client)
+	repo := mongodb.NewFinanceAccountRepository(client)
 	ctx := context.Background()
 
 	// Non-existent ObjectID hex
