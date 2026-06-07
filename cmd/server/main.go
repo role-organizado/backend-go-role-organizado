@@ -46,6 +46,12 @@ import (
 	uccofrinho "github.com/role-organizado/backend-go-role-organizado/internal/usecase/cofrinho"
 	// Lista Presentes
 	uclistapresentes "github.com/role-organizado/backend-go-role-organizado/internal/usecase/listapresentes"
+	// Temporal — Onda 1
+	temporalactivity "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
+	temporalworker "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/worker"
+	ucpricing "github.com/role-organizado/backend-go-role-organizado/internal/usecase/pricing"
+
+	temporalclient "go.temporal.io/sdk/client"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -318,6 +324,43 @@ func main() {
 	// --- Misc handlers (Bloco 3d parity) ---
 	cardapioHandler := handler.NewCardapioHandler(mongoClient)
 	outboundRequestHandler := handler.NewOutboundRequestHandler(mongoClient)
+
+	// --- Temporal Workers (Onda 1 — PricingPspReview) ---
+	// Temporal workers run as background goroutines alongside the HTTP server.
+	// If Temporal is unreachable at startup we log a warning and continue — the
+	// HTTP server keeps serving, and workers can be restarted without downtime.
+	temporalC, temporalErr := temporalclient.Dial(temporalclient.Options{
+		HostPort:  cfg.Temporal.HostPort,
+		Namespace: cfg.Temporal.Namespace,
+	})
+	if temporalErr != nil {
+		slog.Warn("temporal: failed to connect — workers disabled",
+			"host", cfg.Temporal.HostPort,
+			"error", temporalErr,
+		)
+	} else {
+		// Build pricing PSP review chain: use case → activity → worker.
+		pspReviewUC := ucpricing.NewRunPspCostReview(cfg, &http.Client{Timeout: 5 * time.Minute})
+		pspReviewActivity := temporalactivity.NewPricingPspReviewActivity(pspReviewUC)
+
+		workerReg := temporalworker.NewRegistry(temporalC)
+		workerReg.RegisterPricingPspReviewWorker(pspReviewActivity)
+
+		// defer order is LIFO: Stop() runs before Close() — correct ordering.
+		defer temporalC.Close()
+		if startErr := workerReg.Start(); startErr != nil {
+			slog.Error("temporal: failed to start workers", "error", startErr)
+		} else {
+			defer workerReg.Stop()
+		}
+
+		// Create the daily schedule (idempotent — skip if already exists).
+		schedCtx, schedCancel := context.WithTimeout(ctx, 15*time.Second)
+		defer schedCancel()
+		if schedErr := workerReg.InitPricingPspReviewSchedule(schedCtx); schedErr != nil {
+			slog.Warn("temporal: failed to init pricing-psp-review schedule", "error", schedErr)
+		}
+	}
 
 	// Build chi router.
 	r := chi.NewRouter()
