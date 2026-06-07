@@ -34,3 +34,10 @@ func (r *Registry) RegisterReconciliationWorker(acts *temporalactivity.PaymentAc
 	// Activities
 	w.RegisterActivity(acts)
 }
+
+// RegisterSandboxWorker registers the SandboxWorkflow POC on SANDBOX_QUEUE.
+func (r *Registry) RegisterSandboxWorker(act *temporalactivity.SandboxActivity) {
+	w := r.NewWorker("SANDBOX_QUEUE", sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.SandboxWorkflow)
+	w.RegisterActivity(act)
+}
