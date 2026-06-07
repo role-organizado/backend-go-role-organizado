@@ -17,7 +17,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"go.temporal.io/sdk/client"
 
+	temporalactivity "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
+	temporalworker "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/worker"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/handler"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
@@ -318,6 +321,35 @@ func main() {
 	// --- Misc handlers (Bloco 3d parity) ---
 	cardapioHandler := handler.NewCardapioHandler(mongoClient)
 	outboundRequestHandler := handler.NewOutboundRequestHandler(mongoClient)
+
+	// --- Phase 9: Temporal workers (non-fatal — HTTP server starts regardless) ---
+	temporalClient, temporalDialErr := client.Dial(client.Options{
+		HostPort:  cfg.Temporal.HostPort,
+		Namespace: cfg.Temporal.Namespace,
+	})
+	if temporalDialErr != nil {
+		slog.Warn("temporal unavailable — overdue-installment worker not started",
+			"error", temporalDialErr,
+			"host_port", cfg.Temporal.HostPort,
+		)
+	} else {
+		defer temporalClient.Close()
+
+		findMarkUC := ucpayment.NewFindAndMarkOverdueInstallments()
+		dispatchUC := ucnotification.NewDispatchOverdueNotifications()
+		overdueActs := temporalactivity.NewOverdueInstallmentActivities(findMarkUC, dispatchUC)
+
+		reg := temporalworker.NewRegistry(temporalClient)
+		overdueWorker, workerErr := reg.StartOverdueInstallmentWorker(overdueActs)
+		if workerErr != nil {
+			slog.Warn("overdue-installment worker failed to start", "error", workerErr)
+		} else {
+			defer overdueWorker.Stop()
+			if schedErr := temporalworker.InitOverdueInstallmentSchedule(ctx, temporalClient); schedErr != nil {
+				slog.Warn("overdue-installment schedule init failed", "error", schedErr)
+			}
+		}
+	}
 
 	// Build chi router.
 	r := chi.NewRouter()
