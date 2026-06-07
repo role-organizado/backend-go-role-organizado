@@ -902,13 +902,13 @@ func TestGetEventPaymentStatus(t *testing.T) {
 func TestManagePaymentAccounts_Create(t *testing.T) {
 	tests := []struct {
 		name    string
-		input   portin.CreatePaymentAccountInput
+		input   portin.FinanceCreateAccountInput
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name: "PIX CPF inválido com 10 dígitos retorna erro",
-			input: portin.CreatePaymentAccountInput{
+			input: portin.FinanceCreateAccountInput{
 				UserID:  "u1",
 				Type:    "PIX",
 				PixType: "CPF",
@@ -919,7 +919,7 @@ func TestManagePaymentAccounts_Create(t *testing.T) {
 		},
 		{
 			name: "PIX CPF válido com 11 dígitos é salvo",
-			input: portin.CreatePaymentAccountInput{
+			input: portin.FinanceCreateAccountInput{
 				UserID:  "u1",
 				Type:    "PIX",
 				PixType: "CPF",
@@ -929,7 +929,7 @@ func TestManagePaymentAccounts_Create(t *testing.T) {
 		},
 		{
 			name: "PIX EMAIL válido é aceito",
-			input: portin.CreatePaymentAccountInput{
+			input: portin.FinanceCreateAccountInput{
 				UserID:  "u1",
 				Type:    "PIX",
 				PixType: "EMAIL",
@@ -939,7 +939,7 @@ func TestManagePaymentAccounts_Create(t *testing.T) {
 		},
 		{
 			name: "PIX EMAIL sem @ retorna erro",
-			input: portin.CreatePaymentAccountInput{
+			input: portin.FinanceCreateAccountInput{
 				UserID:  "u1",
 				Type:    "PIX",
 				PixType: "EMAIL",
@@ -949,7 +949,7 @@ func TestManagePaymentAccounts_Create(t *testing.T) {
 		},
 		{
 			name: "conta BANK não valida chave PIX",
-			input: portin.CreatePaymentAccountInput{
+			input: portin.FinanceCreateAccountInput{
 				UserID:   "u1",
 				Type:     "BANK",
 				BankCode: "001",
@@ -1036,14 +1036,14 @@ func TestManagePaymentAccounts_Update(t *testing.T) {
 		name    string
 		account *domain.PaymentAccount
 		findErr error
-		input   portin.UpdatePaymentAccountInput
+		input   portin.FinanceUpdateAccountInput
 		wantErr bool
 		errCode int
 	}{
 		{
 			name:    "atualiza conta existente com email válido",
 			account: existing,
-			input: portin.UpdatePaymentAccountInput{
+			input: portin.FinanceUpdateAccountInput{
 				AccountID: "acc-1",
 				UserID:    "u1",
 				Type:      "PIX",
@@ -1055,7 +1055,7 @@ func TestManagePaymentAccounts_Update(t *testing.T) {
 		{
 			name:    "PIX com email inválido retorna 400",
 			account: existing,
-			input: portin.UpdatePaymentAccountInput{
+			input: portin.FinanceUpdateAccountInput{
 				AccountID: "acc-1",
 				UserID:    "u1",
 				Type:      "PIX",
@@ -1068,7 +1068,7 @@ func TestManagePaymentAccounts_Update(t *testing.T) {
 		{
 			name:    "conta não encontrada retorna erro",
 			findErr: apierr.NotFound("account", "acc-999"),
-			input:   portin.UpdatePaymentAccountInput{AccountID: "acc-999", UserID: "u1"},
+			input:   portin.FinanceUpdateAccountInput{AccountID: "acc-999", UserID: "u1"},
 			wantErr: true,
 		},
 	}
