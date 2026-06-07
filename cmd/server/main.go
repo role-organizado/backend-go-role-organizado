@@ -21,6 +21,9 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/handler"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
+	temporaladapter "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal"
+	temporalactivity "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
+	temporalworker "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/worker"
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
 	"github.com/role-organizado/backend-go-role-organizado/migrations"
 	pkgjwt "github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
@@ -36,6 +39,9 @@ import (
 	ucrateio "github.com/role-organizado/backend-go-role-organizado/internal/usecase/rateio"
 	// Phase 5
 	ucpayment "github.com/role-organizado/backend-go-role-organizado/internal/usecase/payment"
+	ucasaas "github.com/role-organizado/backend-go-role-organizado/internal/infra/asaas"
+	paymentdomain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
+	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 	// Phase 6
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
 	// Phase 6b: Notification Templates
@@ -124,6 +130,10 @@ func main() {
 	}
 	if err := migrations.RunV083CreateListaPresentesCollection(ctx, mongoClient.DB()); err != nil {
 		slog.Error("migration v083 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV084CreatePaymentTransactionsIndexes(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v084 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -233,6 +243,7 @@ func main() {
 	// --- Phase 5: Payments domain ---
 	pagamentoRepo := mongodb.NewPagamentoRepository(mongoClient)
 	configPagRepo := mongodb.NewConfigPagamentoRepository(mongoClient)
+	installmentRepo := mongodb.NewPaymentInstallmentRepository(mongoClient)
 
 	createPayUC := ucpayment.NewCreatePagamento(pagamentoRepo)
 	getPayUC := ucpayment.NewGetPagamento(pagamentoRepo)
@@ -243,9 +254,58 @@ func main() {
 	upsertCfgPayUC := ucpayment.NewUpsertConfigPagamento(configPagRepo)
 	getCfgPayUC := ucpayment.NewGetConfigPagamento(configPagRepo)
 
+	// Payment provider (Asaas real vs mock, controlled by ROLE_ASAAS_USE_MOCK).
+	var paymentProvider portout.PaymentProvider
+	var providerName paymentdomain.PaymentProvider
+	if cfg.Asaas.UseMock {
+		paymentProvider = ucasaas.NewMockProvider()
+		providerName = paymentdomain.PaymentProviderMock
+	} else {
+		paymentProvider = ucasaas.NewClient(cfg.Asaas)
+		providerName = paymentdomain.PaymentProviderAsaas
+	}
+
+	// Real-payment repos.
+	txRepo := mongodb.NewPaymentTransactionRepository(mongoClient)
+	customerLinkRepo := mongodb.NewAsaasCustomerLinkRepository(mongoClient)
+	savedCardRepo := mongodb.NewSavedCreditCardRepository(mongoClient)
+
+	// Fee policy snapshot + subledger dual-write services.
+	// FeePolicyService now uses the typed repository (refactor: typed fields vs raw BSON).
+	feePolicySvc := ucpayment.NewFeePolicyService(configPagRepo)
+	subledgerSvc := ucpayment.NewSubledgerDualWriteService(
+		mongoClient.Collection("ledger_entries"),
+		mongoClient.Collection("ledger_snapshot_events"),
+	)
+
+	// ProcessPayment / GetTransaction / ListUserPayments use cases.
+	processPaymentUC := ucpayment.NewProcessPayment(
+		txRepo, customerLinkRepo, usuarioRepo, savedCardRepo,
+		paymentProvider, providerName, feePolicySvc, subledgerSvc,
+	)
+	processBatchPaymentUC := ucpayment.NewProcessBatchPayment(
+		installmentRepo, participanteRepo,
+		txRepo, customerLinkRepo, usuarioRepo, savedCardRepo,
+		paymentProvider, providerName, feePolicySvc, subledgerSvc,
+	)
+	getTransactionUC := ucpayment.NewGetPaymentTransaction(txRepo)
+	listUserPaymentsUC := ucpayment.NewListUserPayments(txRepo)
+
+	listUserInstallmentsUC := ucpayment.NewListUserInstallments(installmentRepo, participanteRepo, eventoRepo)
+	listInstallmentsUC := ucpayment.NewListInstallments(installmentRepo, participanteRepo)
+	getInstallmentUC := ucpayment.NewGetInstallment(installmentRepo, participanteRepo)
+	cancelInstallmentsUC := ucpayment.NewCancelParticipantInstallments(installmentRepo, participanteRepo, eventoRepo)
+
+	reaplicarFeeUC := ucpayment.NewReaplicarFeePolicySnapshot(configPagRepo)
+
 	paymentHandler := handler.NewPaymentHandler(
 		createPayUC, getPayUC, listPayUC, updatePayUC, deletePayUC,
 		confirmarPayUC, upsertCfgPayUC, getCfgPayUC,
+		processPaymentUC, processBatchPaymentUC, getTransactionUC, listUserPaymentsUC, paymentProvider,
+		reaplicarFeeUC,
+	)
+	installmentHandler := handler.NewInstallmentHandler(
+		listUserInstallmentsUC, listInstallmentsUC, getInstallmentUC, cancelInstallmentsUC,
 	)
 
 	// --- Phase 6: Notifications domain ---
@@ -280,6 +340,17 @@ func main() {
 		listNotifUC, getNotifUC, createNotifUC, marcarLidaUC, marcarTodasUC, deleteNotifUC, countUnreadUC,
 	)
 
+	// --- Phase 5c: Webhook callback (wired here — depends on createNotifUC from Phase 6) ---
+	webhookRepo := mongodb.NewProcessedWebhookEventRepository(mongoClient)
+	allocationSvc := ucpayment.NewInstallmentAllocationService(
+		mongoClient.Collection("installment_allocations"),
+		installmentRepo,
+	)
+	handlePaymentCallbackUC := ucpayment.NewHandlePaymentCallback(
+		txRepo, installmentRepo, webhookRepo, allocationSvc, subledgerSvc, createNotifUC,
+	)
+	paymentWebhookHandler := handler.NewPaymentWebhookHandler(handlePaymentCallbackUC, cfg.Asaas.WebhookToken)
+
 	// --- Phase 7: File Storage (GridFS) ---
 	arquivoRepo := mongodb.NewArquivoRepository(mongoClient)
 	gridfsStorage := mongodb.NewGridFSStorageAdapter(mongoClient)
@@ -305,8 +376,70 @@ func main() {
 	removeItemUC := uclistapresentes.NewRemoveItem(listaPresentesRepo)
 	listaPresentesHandler := handler.NewListaPresentesHandler(addItemUC, getItemUC, listItemsUC, reservarItemUC, removeItemUC)
 
-	// --- Phase 8: Temporal Workflow Proxies ---
+	// --- Phase 8: Temporal Worker (payment workflows) ---
+	// Enabled via TEMPORAL_WORKER_ENABLED=true (default: false during Strangler Fig migration).
+	// When disabled, no-op starters/signalers are used so the payment use cases compile and
+	// run correctly without a live Temporal cluster.
+	var temporalStarter portout.TemporalWorkflowStarter = &temporaladapter.NoopWorkflowStarter{}
+	var temporalSignaler portout.TemporalWorkflowSignaler = &temporaladapter.NoopWorkflowSignaler{}
+
+	if cfg.Temporal.WorkerEnabled {
+		temporalClient, temporalErr := temporaladapter.NewClient(cfg.Temporal)
+		if temporalErr != nil {
+			slog.Error("failed to connect to Temporal", "error", temporalErr)
+			os.Exit(1)
+		}
+		defer temporalClient.Close()
+
+		temporalStarter = temporaladapter.NewClientWorkflowStarter(temporalClient)
+		temporalSignaler = temporaladapter.NewClientWorkflowSignaler(temporalClient)
+
+		// Build activities and register workers.
+		reconcileReportRepo := mongodb.NewReconciliationReportRepository(mongoClient)
+		expireUC := ucpayment.NewExpireTransaction(txRepo)
+		reconcileUC := ucpayment.NewReconcilePspTransactions(txRepo, paymentProvider)
+
+		paymentActs := temporalactivity.NewPaymentActivities(
+			txRepo, expireUC, handlePaymentCallbackUC, reconcileUC, reconcileReportRepo,
+		)
+
+		temporalRegistry := temporalworker.NewRegistry(temporalClient)
+		temporalRegistry.RegisterPaymentWorker(paymentActs)
+		temporalRegistry.RegisterReconciliationWorker(paymentActs)
+
+		if startErr := temporalRegistry.Start(); startErr != nil {
+			slog.Error("failed to start Temporal workers", "error", startErr)
+			os.Exit(1)
+		}
+		defer temporalRegistry.Stop()
+
+		slog.Info("temporal workers started",
+			"hostPort", cfg.Temporal.HostPort,
+			"namespace", cfg.Temporal.Namespace,
+		)
+	} else {
+		slog.Info("temporal workers disabled (TEMPORAL_WORKER_ENABLED=false)")
+	}
+
+	// Wire Temporal starters/signalers into payment use cases (nil-safe, non-breaking).
+	// ProcessBatchPayment: TODO add WithTemporalStarter when batch expiration is required.
+	processPaymentUC.WithTemporalStarter(temporalStarter)
+	handlePaymentCallbackUC.
+		WithTemporalSignaler(temporalSignaler).
+		WithTemporalStarter(temporalStarter)
+
+	// --- Phase 8b: Temporal Workflow Proxies (Java fallback) ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
+
+	// --- Phase 5b: Payment Methods + PIX validate + Saved Cards (hexagonal) ---
+	// savedCardRepo is reused from Phase 5 (already declared above).
+	paymentAccountRepo := mongodb.NewPaymentAccountRepository(mongoClient)
+
+	manageAccountsUC := ucpayment.NewManagePaymentAccounts(paymentAccountRepo)
+	validatePixUC := ucpayment.NewValidatePixKey()
+	manageSavedCardsUC := ucpayment.NewManageSavedCards(savedCardRepo)
+
+	paymentMethodsHandler := handler.NewPaymentMethodsHandler(manageAccountsUC, validatePixUC, manageSavedCardsUC)
 
 	// --- Finance, Admin, Participantes handlers (direct MongoDB) ---
 	financeHandler := handler.NewFinanceHandler(mongoClient)
@@ -336,8 +469,9 @@ func main() {
 
 	// --- Public routes (no JWT required) ---
 	authHandler.RegisterRoutes(r)
-	configHandler.RegisterRoutes(r) // GET /api/v1/dominios (public read) + admin write
+	configHandler.RegisterRoutes(r)          // GET /api/v1/dominios (public read) + admin write
 	cardapioHandler.RegisterCardapioRoutes(r) // GET /api/cardapios (public — Java parity)
+	paymentWebhookHandler.RegisterWebhookRoutes(r) // POST /api/v1/webhooks/payment/asaas (no JWT)
 
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {
@@ -354,6 +488,8 @@ func main() {
 		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 		listaPresentesHandler.RegisterListaPresentesRoutes(r)
 		financeHandler.RegisterFinanceRoutes(r)
+		paymentMethodsHandler.RegisterPaymentMethodsRoutes(r)
+		installmentHandler.RegisterInstallmentRoutes(r)
 		adminHandler.RegisterAdminRoutes(r)
 		participantesHandler.RegisterParticipantesRoutes(r)
 		usuariosEventoHandler.RegisterUsuariosEventoRoutes(r)

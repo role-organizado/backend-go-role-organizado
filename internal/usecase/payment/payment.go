@@ -2,7 +2,10 @@ package payment
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/payment"
 	portin "github.com/role-organizado/backend-go-role-organizado/internal/port/in"
@@ -190,31 +193,63 @@ func NewUpsertConfigPagamento(r portout.EventoConfigPagamentoRepository) *Upsert
 	return &UpsertConfigPagamento{configs: r}
 }
 
+// buildFeePolicyVersion generates the snapshot version string for an event config.
+// Format matches Java: pricing-policy:{versionId}:{eventId}:{effectiveFrom}.
+// Returns empty string when no fee policy was configured (both percents are 0).
+func buildFeePolicyVersion(eventID string, platformFee, pspFee float64, now time.Time) string {
+	if platformFee == 0 && pspFee == 0 {
+		return ""
+	}
+	return fmt.Sprintf("pricing-policy:%s:%s:%s",
+		uuid.New().String(),
+		eventID,
+		now.UTC().Format(time.RFC3339),
+	)
+}
+
 // Execute creates or updates the payment config for an event.
+// When fee fields are provided (PlatformFeePercent or PspFeePercent non-zero),
+// a FeePolicyVersion snapshot string is generated — mirroring Java
+// AtualizarConfigPagamentoUseCase behaviour.
 func (uc *UpsertConfigPagamento) Execute(ctx context.Context, in portin.UpsertConfigPagamentoInput) (*domain.EventoConfigPagamento, error) {
 	now := time.Now()
+	feeVersion := buildFeePolicyVersion(in.EventoID, in.PlatformFeePercent, in.PspFeePercent, now)
 
 	existing, err := uc.configs.FindByEventoID(ctx, in.EventoID)
 	if err == nil && existing != nil {
-		// update existing
+		// update existing — preserve immutable fields, overwrite mutable ones
 		existing.MetodosPagamento = in.MetodosPagamento
 		existing.PrazoPagamento = in.PrazoPagamento
 		existing.ChavePix = in.ChavePix
 		existing.InstrucoesBoleto = in.InstrucoesBoleto
+		existing.PlatformFeePercent = in.PlatformFeePercent
+		existing.PspFeePercent = in.PspFeePercent
+		existing.PaymentProvider = in.PaymentProvider
+		existing.PaymentFrequency = in.PaymentFrequency
+		existing.PaymentReleaseTrigger = in.PaymentReleaseTrigger
+		if feeVersion != "" {
+			existing.FeePolicyVersion = feeVersion
+		}
 		existing.UpdatedAt = now
 		return uc.configs.Update(ctx, existing)
 	}
 
 	// create new
 	cfg := &domain.EventoConfigPagamento{
-		EventoID:         in.EventoID,
-		UsuarioID:        in.UsuarioID,
-		MetodosPagamento: in.MetodosPagamento,
-		PrazoPagamento:   in.PrazoPagamento,
-		ChavePix:         in.ChavePix,
-		InstrucoesBoleto: in.InstrucoesBoleto,
-		CriadoEm:        now,
-		UpdatedAt:        now,
+		EventoID:              in.EventoID,
+		UsuarioID:             in.UsuarioID,
+		MetodosPagamento:      in.MetodosPagamento,
+		PrazoPagamento:        in.PrazoPagamento,
+		ChavePix:              in.ChavePix,
+		InstrucoesBoleto:      in.InstrucoesBoleto,
+		PlatformFeePercent:    in.PlatformFeePercent,
+		PspFeePercent:         in.PspFeePercent,
+		PaymentProvider:       in.PaymentProvider,
+		PaymentFrequency:      in.PaymentFrequency,
+		PaymentReleaseTrigger: in.PaymentReleaseTrigger,
+		FeePolicyVersion:      feeVersion,
+		CriadoEm:             now,
+		UpdatedAt:             now,
 	}
 	return uc.configs.Save(ctx, cfg)
 }
