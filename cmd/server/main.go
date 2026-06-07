@@ -21,6 +21,8 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/handler"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
+	temporaladapter "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal"
+	temporalworker "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/worker"
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
 	"github.com/role-organizado/backend-go-role-organizado/migrations"
 	pkgjwt "github.com/role-organizado/backend-go-role-organizado/pkg/jwt"
@@ -318,6 +320,21 @@ func main() {
 	// --- Misc handlers (Bloco 3d parity) ---
 	cardapioHandler := handler.NewCardapioHandler(mongoClient)
 	outboundRequestHandler := handler.NewOutboundRequestHandler(mongoClient)
+
+	// --- Phase 9: Temporal Workers ---
+	temporalClient, err := temporaladapter.NewClient(cfg.Temporal)
+	if err != nil {
+		slog.Error("failed to connect to Temporal", "error", err)
+		os.Exit(1)
+	}
+	defer temporalClient.Close()
+	temporalRegistry := temporalworker.NewRegistry(temporalClient)
+	// Workers are registered per migration wave (T003, T004, T005, T006).
+	if err := temporalRegistry.Start(); err != nil {
+		slog.Error("failed to start Temporal workers", "error", err)
+		os.Exit(1)
+	}
+	defer temporalRegistry.Stop()
 
 	// Build chi router.
 	r := chi.NewRouter()
