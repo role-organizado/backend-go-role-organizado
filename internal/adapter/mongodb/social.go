@@ -293,12 +293,18 @@ func (r *SocialFeaturesRepository) UnclaimBringListItem(ctx context.Context, eve
 func (r *SocialFeaturesRepository) SetCheckinHabilitado(ctx context.Context, eventoID string, habilitado bool) error {
 	now := time.Now().UTC()
 	filter := bson.D{{Key: "eventoId", Value: eventoID}}
+	// NOTE: $setOnInsert must NOT include checkinHabilitado — $set already sets it,
+	// and MongoDB raises a path-conflict error when both operators touch the same field.
 	update := bson.D{
 		{Key: "$set", Value: bson.D{
 			{Key: "checkinHabilitado", Value: habilitado},
 			{Key: "atualizadoEm", Value: now},
 		}},
-		{Key: "$setOnInsert", Value: newSocialDefaults(eventoID, now)},
+		{Key: "$setOnInsert", Value: bson.D{
+			{Key: "_id", Value: uuid.New().String()},
+			{Key: "eventoId", Value: eventoID},
+			{Key: "criadoEm", Value: now},
+		}},
 	}
 	opts := options.UpdateOne().SetUpsert(true)
 	if _, err := r.col.UpdateOne(ctx, filter, update, opts); err != nil {
