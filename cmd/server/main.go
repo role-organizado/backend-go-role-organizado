@@ -450,6 +450,7 @@ func main() {
 		temporalRegistry := temporalworker.NewRegistry(temporalClient)
 		temporalRegistry.RegisterPaymentWorker(paymentActs)
 		temporalRegistry.RegisterReconciliationWorker(paymentActs)
+		temporalRegistry.RegisterSandboxWorker(temporalactivity.NewSandboxActivity())
 
 		pspReviewUC := ucpricing.NewRunPspCostReview(cfg, &http.Client{Timeout: 5 * time.Minute})
 		pspReviewActivity := temporalactivity.NewPricingPspReviewActivity(pspReviewUC)
