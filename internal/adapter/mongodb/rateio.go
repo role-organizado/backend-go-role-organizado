@@ -52,7 +52,7 @@ func statusFromMongo(s string) domain.StatusRateio {
 
 func rateioDocFromDomain(r *domain.Rateio) rateioDocument {
 	eventoIDHex := r.EventoID
-	eventoIDBin := uuidStringToBinary(eventoIDHex)
+	eventoIDBin := UUIDStringToBinary(eventoIDHex)
 
 	doc := rateioDocument{
 		EventoID:          eventoIDBin,
@@ -113,9 +113,9 @@ func (r *RateioMongoRepository) FindByID(ctx context.Context, id string) (*domai
 
 func (r *RateioMongoRepository) FindByEventoID(ctx context.Context, eventoID string) ([]domain.Rateio, error) {
 	// eventoID must be a valid UUID string — it is stored as bson.Binary subtype 4
-	// in the Java-compatible schema. uuidStringToBinary produces the same binary
+	// in the Java-compatible schema. UUIDStringToBinary produces the same binary
 	// on every call for a given valid UUID, ensuring the filter matches the stored value.
-	filter := bson.D{{Key: "evento_id", Value: uuidStringToBinary(eventoID)}}
+	filter := bson.D{{Key: "evento_id", Value: UUIDStringToBinary(eventoID)}}
 	cur, err := r.col.Find(ctx, filter)
 	if err != nil {
 		return nil, apierr.Internal(err.Error())

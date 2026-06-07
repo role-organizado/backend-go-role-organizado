@@ -7,23 +7,60 @@ import (
 	"strings"
 
 	"go.temporal.io/sdk/client"
+
+	temporalworkflow "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
 )
 
 const (
-	// PricingPspReviewScheduleID is the unique ID of the daily pricing PSP review schedule.
 	PricingPspReviewScheduleID = "pricing-psp-review-daily-workflow"
-
-	// pricingPspReviewTaskQueue is the task queue polled by the PricingPspReview worker.
-	pricingPspReviewTaskQueue = "PRICING_PSP_REVIEW_QUEUE"
-
-	// pricingPspReviewCron is the UTC cron expression for 02:30 BRT (= 05:30 UTC).
-	pricingPspReviewCron = "30 5 * * *"
+	pricingPspReviewTaskQueue  = "PRICING_PSP_REVIEW_QUEUE"
+	pricingPspReviewCron       = "30 5 * * *"
 )
 
+// ScheduleInitializer creates and upserts Temporal Schedules for periodic workflows.
+// It mirrors the Java TemporalScheduleInitializer / app.temporal.schedules configuration.
+type ScheduleInitializer struct {
+	client client.Client
+}
+
+// NewScheduleInitializer creates a new ScheduleInitializer backed by a Temporal client.
+func NewScheduleInitializer(c client.Client) *ScheduleInitializer {
+	return &ScheduleInitializer{client: c}
+}
+
+// InitializeReconciliationSchedule creates or updates the daily PSP reconciliation
+// Temporal Schedule. The schedule triggers ReconciliationWorkflow every day at 06:00.
+func (si *ScheduleInitializer) InitializeReconciliationSchedule(ctx context.Context) error {
+	scheduleID := temporalworkflow.PspReconciliationScheduledID
+
+	handle := si.client.ScheduleClient().GetHandle(ctx, scheduleID)
+	_, descErr := handle.Describe(ctx)
+	if descErr == nil {
+		slog.InfoContext(ctx, "temporal: reconciliation schedule already exists, skipping upsert",
+			"scheduleID", scheduleID)
+		return nil
+	}
+
+	_, err := si.client.ScheduleClient().Create(ctx, client.ScheduleOptions{
+		ID: scheduleID,
+		Spec: client.ScheduleSpec{
+			CronExpressions: []string{"0 6 * * *"},
+		},
+		Action: &client.ScheduleWorkflowAction{
+			Workflow:  temporalworkflow.ReconciliationWorkflow,
+			TaskQueue: temporalworkflow.ReconciliationTaskQueue,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("temporal: create reconciliation schedule: %w", err)
+	}
+
+	slog.InfoContext(ctx, "temporal: reconciliation schedule created", "scheduleID", scheduleID)
+	return nil
+}
+
 // InitPricingPspReviewSchedule creates the daily Temporal schedule for PricingPspReviewWorkflow.
-//
-// The schedule fires at 02:30 BRT (05:30 UTC) every day.
-// If a schedule with the same ID already exists, the method logs a warning and returns nil.
+// Fires at 02:30 BRT (05:30 UTC) every day. Idempotent — skips if already exists.
 func (r *Registry) InitPricingPspReviewSchedule(ctx context.Context) error {
 	handle, err := r.client.ScheduleClient().Create(ctx, client.ScheduleOptions{
 		ID: PricingPspReviewScheduleID,
@@ -33,8 +70,6 @@ func (r *Registry) InitPricingPspReviewSchedule(ctx context.Context) error {
 		Action: &client.ScheduleWorkflowAction{
 			Workflow:  "PricingPspReviewWorkflow",
 			TaskQueue: pricingPspReviewTaskQueue,
-			// referenceDate is intentionally omitted; the workflow determines
-			// the current date from workflow.Now() when needed.
 		},
 	})
 	if err != nil {
@@ -45,7 +80,7 @@ func (r *Registry) InitPricingPspReviewSchedule(ctx context.Context) error {
 		}
 		return fmt.Errorf("criar schedule pricing-psp-review: %w", err)
 	}
-	_ = handle // handle available for future describe/trigger/pause operations
+	_ = handle
 
 	slog.Info("pricing psp review schedule created",
 		"scheduleId", PricingPspReviewScheduleID,

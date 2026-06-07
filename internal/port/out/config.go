@@ -24,3 +24,7 @@ type ConfigSistemaRepository interface {
 	FindByChave(ctx context.Context, chave string) (*config.ConfiguracaoSistema, error)
 	Save(ctx context.Context, c *config.ConfiguracaoSistema) (*config.ConfiguracaoSistema, error)
 }
+
+// ConfiguracaoSistemaRepository is an alias for ConfigSistemaRepository,
+// provided for use in finance use cases for readability.
+type ConfiguracaoSistemaRepository = ConfigSistemaRepository

@@ -45,7 +45,7 @@ func (h *ParticipantesHandler) BuscarRecentes(w http.ResponseWriter, r *http.Req
 	// Fetch user's last 2 events (as organizer)
 	eventosCol := h.mongo.Collection("eventos")
 	eventsCursor, err := eventosCol.Find(ctx,
-		bson.M{"usuario_id_responsavel": uuidStringToBinary(userID)},
+		bson.M{"usuario_id_responsavel": mongodb.UUIDStringToBinary(userID)},
 		options.Find().SetSort(bson.D{{Key: "data_inicio", Value: -1}}).SetLimit(2).SetProjection(bson.M{"_id": 1}),
 	)
 	if err != nil {
@@ -72,7 +72,7 @@ func (h *ParticipantesHandler) BuscarRecentes(w http.ResponseWriter, r *http.Req
 	participantesCol := h.mongo.Collection("participants")
 	partCursor, err := participantesCol.Find(ctx, bson.M{
 		"evento_id":  bson.M{"$in": eventIDs},
-		"usuario_id": bson.M{"$ne": uuidStringToBinary(userID)},
+		"usuario_id": bson.M{"$ne": mongodb.UUIDStringToBinary(userID)},
 	})
 	if err != nil {
 		writeJSON(w, http.StatusOK, []bson.M{})
@@ -89,7 +89,7 @@ func (h *ParticipantesHandler) BuscarRecentes(w http.ResponseWriter, r *http.Req
 	// Collect unique user IDs from participants
 	userIDCounts := make(map[string]int)
 	for _, p := range participantes {
-		uid := binaryToUUIDString(p["usuario_id"])
+		uid := mongodb.BinaryToUUIDString(p["usuario_id"])
 		if uid != "" {
 			userIDCounts[uid]++
 		}
@@ -99,7 +99,7 @@ func (h *ParticipantesHandler) BuscarRecentes(w http.ResponseWriter, r *http.Req
 	usuariosCol := h.mongo.Collection("usuarios")
 	var uniqueUserIDs []any
 	for uid := range userIDCounts {
-		uniqueUserIDs = append(uniqueUserIDs, uuidStringToBinary(uid))
+		uniqueUserIDs = append(uniqueUserIDs, mongodb.UUIDStringToBinary(uid))
 	}
 
 	usersCursor, err := usuariosCol.Find(ctx,
@@ -119,7 +119,7 @@ func (h *ParticipantesHandler) BuscarRecentes(w http.ResponseWriter, r *http.Req
 	// Java fields: nome, telefone, email, quantidadeEventosRecentes (camelCase), jaCadastrado (camelCase)
 	sugestoes := make([]bson.M, 0, len(usuarios))
 	for _, u := range usuarios {
-		uid := binaryToUUIDString(u["_id"])
+		uid := mongodb.BinaryToUUIDString(u["_id"])
 		count := userIDCounts[uid]
 
 		sugestao := bson.M{
@@ -200,7 +200,7 @@ func (h *ParticipantesHandler) LookupParticipante(w http.ResponseWriter, r *http
 		return
 	}
 	response := bson.M{
-		"id":        binaryToUUIDString(result["_id"]),
+		"id":        mongodb.BinaryToUUIDString(result["_id"]),
 		"nome":      result["nome"],
 		"email":     result["email"],
 		"telefone":  result["telefone"],

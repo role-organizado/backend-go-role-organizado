@@ -1,60 +1,54 @@
-// Package worker manages Temporal worker lifecycle for the Go backend.
+// Package worker provides Temporal worker registration and lifecycle management.
 package worker
 
 import (
 	"fmt"
-	"log/slog"
 
 	"go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"
-
-	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
-	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/workflow"
 )
 
-// Registry manages a pool of Temporal workers sharing a single client connection.
+// Registry manages a collection of Temporal workers, providing a unified Start/Stop
+// lifecycle. Equivalent to the Java TemporalWorkerRegistry pattern.
 type Registry struct {
 	client  client.Client
 	workers []sdkworker.Worker
 }
 
-// NewRegistry creates a Registry backed by the given Temporal client.
+// NewRegistry creates a new worker registry backed by the provided Temporal client.
 func NewRegistry(c client.Client) *Registry {
 	return &Registry{client: c}
 }
 
-// NewWorker creates and registers a new worker for the given task queue.
-// The worker is accumulated internally and started with Start().
+// NewWorker creates a new Temporal worker for the given task queue and appends it
+// to the registry. The worker is NOT started until Start() is called.
 func (r *Registry) NewWorker(taskQueue string, opts sdkworker.Options) sdkworker.Worker {
 	w := sdkworker.New(r.client, taskQueue, opts)
 	r.workers = append(r.workers, w)
 	return w
 }
 
-// RegisterPricingPspReviewWorker registers the PricingPspReview workflow and activity
-// on the PRICING_PSP_REVIEW_QUEUE task queue.
-func (r *Registry) RegisterPricingPspReviewWorker(act *activity.PricingPspReviewActivity) {
-	w := r.NewWorker("PRICING_PSP_REVIEW_QUEUE", sdkworker.Options{})
-	w.RegisterWorkflow(workflow.PricingPspReviewWorkflow)
-	w.RegisterActivity(act)
-}
-
-// Start launches all registered workers in the background.
-// Returns the first error encountered; subsequent workers are not started.
+// Start starts all registered workers. Workers begin polling their task queues.
 func (r *Registry) Start() error {
-	for _, w := range r.workers {
+	for i, w := range r.workers {
 		if err := w.Start(); err != nil {
-			return fmt.Errorf("starting temporal worker: %w", err)
+			for j := 0; j < i; j++ {
+				r.workers[j].Stop()
+			}
+			return fmt.Errorf("start worker %d: %w", i, err)
 		}
 	}
-	slog.Info("temporal workers started", "count", len(r.workers))
 	return nil
 }
 
-// Stop gracefully stops all registered workers and drains in-flight activity/workflow tasks.
+// Stop stops all registered workers gracefully.
 func (r *Registry) Stop() {
-	for _, w := range r.workers {
-		w.Stop()
+	for i := len(r.workers) - 1; i >= 0; i-- {
+		r.workers[i].Stop()
 	}
-	slog.Info("temporal workers stopped", "count", len(r.workers))
+}
+
+// Client returns the underlying Temporal client, useful for schedule management.
+func (r *Registry) Client() client.Client {
+	return r.client
 }
