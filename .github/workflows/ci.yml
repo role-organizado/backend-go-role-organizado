@@ -1,8 +1,8 @@
 name: CI
 
+# Push em main/staging/develop é coberto pelo deploy.yml (test → build → deploy → smoke).
+# Este workflow valida apenas pull requests.
 on:
-  push:
-    branches: [main, staging, develop]
   pull_request:
     branches: [main, staging, develop]
 
