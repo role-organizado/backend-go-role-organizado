@@ -1,55 +1,60 @@
-// Package workflow provides stable workflow ID constructors that match Java's
-// TemporalWorkflowIds.java exactly. Every function here has a 1-to-1 counterpart
-// in the Java implementation so that workflow IDs remain consistent during the
-// Strangler Fig migration period.
+// Package workflow provides Temporal workflow definitions and ID helpers for the
+// Rolê Organizado backend.
+//
+// CRITICAL: Workflow ID functions must have EXACT parity with Java TemporalWorkflowIds.java.
+// Divergence breaks signal-by-workflowId in production — e.g., a PIX payment webhook from
+// the Java backend would fail to signal the Go PaymentExpirationWorkflow if IDs differ.
 package workflow
 
 import "strings"
 
-// EventPublicationPrimaryID returns the workflow ID for an EventPublicationExecution.
+// ─── Workflow ID constructors ─────────────────────────────────────────────────
+
+// EventPublicationPrimaryID returns the workflow ID for an event publication workflow.
 func EventPublicationPrimaryID(draftId string) string {
 	return "event-publication-real-" + draftId
 }
 
-// OutboundPrimaryID returns the workflow ID for an OutboundExecution.
+// OutboundPrimaryID returns the workflow ID for an outbound request workflow.
 func OutboundPrimaryID(outboundRequestId string) string {
 	return "outbound-real-" + outboundRequestId
 }
 
-// ParticipantLifecyclePrimaryID returns the workflow ID for a ParticipantLifecycle.
+// ParticipantLifecyclePrimaryID returns the workflow ID for a participant lifecycle workflow.
 func ParticipantLifecyclePrimaryID(eventId, participantId string) string {
 	return "participant-lifecycle-real-" + eventId + "-" + participantId
 }
 
-// PspReconciliationPrimaryID returns the workflow ID for a manual PspReconciliation run.
+// PspReconciliationPrimaryID returns the workflow ID for a PSP reconciliation workflow.
 func PspReconciliationPrimaryID(scopeId, referenceDate string) string {
 	return "psp-reconciliation-real-" + scopeId + "-" + referenceDate
 }
 
-// PaymentExpirationPrimaryID returns the workflow ID for a PaymentExpiration.
+// PaymentExpirationPrimaryID returns the workflow ID for a payment expiration workflow.
+// This ID MUST match the Java backend's PaymentExpirationWorkflow ID scheme so that
+// signals from the Java webhook handler reach the Go worker during migration.
 func PaymentExpirationPrimaryID(transactionId string) string {
 	return "payment-expiration-real-" + transactionId
 }
 
-// FinanceReconciliationPrimaryID returns the workflow ID for a manual FinanceReconciliation run.
+// FinanceReconciliationPrimaryID returns the workflow ID for a finance reconciliation workflow.
 func FinanceReconciliationPrimaryID(referenceDate string) string {
 	return "finance-reconciliation-real-" + referenceDate
 }
 
-// OverdueInstallmentPrimaryID returns the workflow ID for a manual OverdueInstallment run.
+// OverdueInstallmentPrimaryID returns the workflow ID for an overdue installment workflow.
 func OverdueInstallmentPrimaryID(referenceDate string) string {
 	return "overdue-installment-real-" + referenceDate
 }
 
-// InviteLifecyclePrimaryID returns the workflow ID for an InviteLifecycle.
+// InviteLifecyclePrimaryID returns the workflow ID for an invite lifecycle workflow.
 func InviteLifecyclePrimaryID(approvalId string) string {
 	return "invite-lifecycle-real-" + approvalId
 }
 
-// AccountingSnapshotPrimaryID returns the workflow ID for an AccountingSnapshot.
-// When correlationId is provided it is used directly as the discriminator key;
-// otherwise the key is composed from dataInicio and dataFim (with "all"/"today"
-// as fallbacks), matching the Java AccountingSnapshotWorkflowIds logic.
+// AccountingSnapshotPrimaryID returns the workflow ID for an accounting snapshot workflow.
+// When correlationId is provided it is used as the key; otherwise a key is derived from
+// the date range, matching the Java AccountingSnapshotWorkflow logic.
 func AccountingSnapshotPrimaryID(dataInicio, dataFim, correlationId string) string {
 	var key string
 	if correlationId != "" {
@@ -68,34 +73,35 @@ func AccountingSnapshotPrimaryID(dataInicio, dataFim, correlationId string) stri
 	return "accounting-snapshot-real-" + key
 }
 
-// NotificationFallbackPrimaryID returns the workflow ID for a NotificationFallback.
+// NotificationFallbackPrimaryID returns the workflow ID for a notification fallback workflow.
 func NotificationFallbackPrimaryID(notificationId string) string {
 	return "notification-fallback-real-" + notificationId
 }
 
-// PricingPspReviewPrimaryID returns the workflow ID for a manual PricingPspReview run.
+// PricingPspReviewPrimaryID returns the workflow ID for a pricing PSP review workflow.
 func PricingPspReviewPrimaryID(referenceDate string) string {
 	return "pricing-psp-review-real-" + referenceDate
 }
 
-// EventPublicationMonitoringPrimaryID returns the fixed singleton workflow ID
-// for the continuous EventPublicationMonitoring loop.
+// EventPublicationMonitoringPrimaryID returns the fixed workflow ID for the event
+// publication monitoring workflow (singleton).
 func EventPublicationMonitoringPrimaryID() string {
 	return "event-publication-monitoring-real"
 }
 
-// ParticipantRecalculationPrimaryID returns the workflow ID for a ParticipantRecalculation.
+// ParticipantRecalculationPrimaryID returns the workflow ID for a participant
+// recalculation workflow.
 func ParticipantRecalculationPrimaryID(eventId string) string {
 	return "participant-recalculation-real-" + eventId
 }
 
-// EventLifecyclePrimaryID returns the workflow ID for an EventLifecycle.
+// EventLifecyclePrimaryID returns the workflow ID for an event lifecycle workflow.
 func EventLifecyclePrimaryID(eventoId string) string {
 	return "event-lifecycle-real-" + eventoId
 }
 
-// PaymentConfirmationPrimaryID returns the workflow ID for a PaymentConfirmation.
-// callbackType is lower-cased and defaults to "unknown" when empty.
+// PaymentConfirmationPrimaryID returns the workflow ID for a payment confirmation workflow.
+// callbackType is lowercased for consistent ID generation.
 func PaymentConfirmationPrimaryID(providerTransactionId, callbackType string) string {
 	ct := callbackType
 	if ct == "" {
@@ -104,12 +110,44 @@ func PaymentConfirmationPrimaryID(providerTransactionId, callbackType string) st
 	return "payment-confirmation-real-" + providerTransactionId + "-" + strings.ToLower(ct)
 }
 
-// Scheduled workflow IDs — fixed identifiers for Temporal schedules that trigger
-// daily batch workflows. These must match the Java TemporalScheduleInitializer
-// constants so that the same schedule name is reused after Go cutover.
+// ─── Scheduled workflow IDs ───────────────────────────────────────────────────
+// These constants correspond to Temporal Schedule IDs managed by the Java backend.
+// The Go worker MUST use the same IDs to avoid creating duplicate schedules.
+
 const (
-	PspReconciliationScheduledID     = "psp-reconciliation-daily-workflow"
+	// PspReconciliationScheduledID is the Temporal Schedule ID for the daily PSP
+	// reconciliation workflow. Matches Java app.temporal.schedules.psp-reconciliation.
+	PspReconciliationScheduledID = "psp-reconciliation-daily-workflow"
+
+	// FinanceReconciliationScheduledID is the Temporal Schedule ID for the daily
+	// finance reconciliation workflow.
 	FinanceReconciliationScheduledID = "finance-reconciliation-daily-workflow"
-	OverdueInstallmentScheduledID    = "overdue-installment-daily-workflow"
-	PricingPspReviewScheduledID      = "pricing-psp-review-daily-workflow"
+
+	// OverdueInstallmentScheduledID is the Temporal Schedule ID for the daily
+	// overdue installment processing workflow.
+	OverdueInstallmentScheduledID = "overdue-installment-daily-workflow"
+
+	// PricingPspReviewScheduledID is the Temporal Schedule ID for the daily pricing
+	// PSP review workflow.
+	PricingPspReviewScheduledID = "pricing-psp-review-daily-workflow"
+)
+
+// ─── Task queues ──────────────────────────────────────────────────────────────
+
+const (
+	// PaymentTaskQueue is the Temporal task queue for all payment-related workflows.
+	//
+	// IMPORTANT — Strangler Fig compatibility:
+	// During migration, both Go and Java workers MUST poll this same task queue so
+	// that signals sent by the Java webhook handler reach the Go PaymentExpirationWorkflow
+	// (and vice versa). If the Java backend uses a different queue name, update this
+	// constant and redeploy both backends simultaneously.
+	//
+	// Java reference: search for PAYMENT_TASK_QUEUE or @Worker("payment-queue") in
+	// the Java PaymentWorkflowConfiguration. If incompatible, use a signalling proxy:
+	// Java sends signal → proxy reads Java queue → forwards to Go queue.
+	PaymentTaskQueue = "payment-queue"
+
+	// ReconciliationTaskQueue is the Temporal task queue for reconciliation workflows.
+	ReconciliationTaskQueue = "reconciliation-queue"
 )

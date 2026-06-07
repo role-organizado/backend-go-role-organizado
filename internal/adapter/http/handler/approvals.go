@@ -59,7 +59,7 @@ func (h *ApprovalsHandler) ContarPendentes(w http.ResponseWriter, r *http.Reques
 	col := h.mongo.Collection("approval_items")
 	// approver_id is stored as UUID Binary — must convert before querying
 	count, err := col.CountDocuments(ctx, bson.M{
-		"approver_id": uuidStringToBinary(userId),
+		"approver_id": mongodb.UUIDStringToBinary(userId),
 		"status":      "PENDING",
 	})
 	if err != nil {
@@ -86,7 +86,7 @@ func (h *ApprovalsHandler) GetPendingApprovals(w http.ResponseWriter, r *http.Re
 
 	col := h.mongo.Collection("approval_items")
 	cursor, err := col.Find(ctx, bson.M{
-		"approver_id": uuidStringToBinary(userId),
+		"approver_id": mongodb.UUIDStringToBinary(userId),
 		"status":      "PENDING",
 	})
 	if err != nil {
@@ -119,7 +119,7 @@ func (h *ApprovalsHandler) GetApprovalHistory(w http.ResponseWriter, r *http.Req
 
 	col := h.mongo.Collection("approval_items")
 	cursor, err := col.Find(ctx, bson.M{
-		"approver_id": uuidStringToBinary(userId),
+		"approver_id": mongodb.UUIDStringToBinary(userId),
 		"status":      bson.M{"$in": bson.A{"APROVADO", "REJEITADO", "CANCELADO"}},
 	})
 	if err != nil {
@@ -143,10 +143,10 @@ func toApprovalResponses(items []bson.M) []map[string]any {
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		resp := map[string]any{
-			"id":            binaryToUUIDString(item["_id"]),
+			"id":            mongodb.BinaryToUUIDString(item["_id"]),
 			"tipo":          item["tipo"],
-			"eventoId":      binaryToUUIDString(item["evento_id"]),
-			"solicitanteId": binaryToUUIDString(item["solicitante_id"]),
+			"eventoId":      mongodb.BinaryToUUIDString(item["evento_id"]),
+			"solicitanteId": mongodb.BinaryToUUIDString(item["solicitante_id"]),
 			"status":        item["status"],
 			"criadoEm":      item["criado_em"],
 		}

@@ -1,50 +1,59 @@
-// Package worker provides the Temporal worker registry and schedule initializer
-// for the backend-go-role-organizado service.
+// Package worker provides Temporal worker registration and lifecycle management.
 package worker
 
 import (
+	"fmt"
+
 	"go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"
 )
 
-// Registry holds all Temporal workers created for this process.
-// It mirrors the Java TemporalWorkerRegistry: a central place to create,
-// start, and stop workers so main.go only deals with one object.
+// Registry manages a collection of Temporal workers, providing a unified Start/Stop
+// lifecycle. Equivalent to the Java TemporalWorkerRegistry pattern.
 type Registry struct {
 	client  client.Client
 	workers []sdkworker.Worker
 }
 
-// NewRegistry creates a Registry backed by the given Temporal client.
+// NewRegistry creates a new worker registry backed by the provided Temporal client.
 func NewRegistry(c client.Client) *Registry {
 	return &Registry{client: c}
 }
 
-// NewWorker creates a new worker for taskQueue, registers it internally,
-// and returns it so callers can register workflows and activities on it.
-// Call Start() after all workflows/activities have been registered.
+// NewWorker creates a new Temporal worker for the given task queue and appends it
+// to the registry. The worker is NOT started until Start() is called.
 func (r *Registry) NewWorker(taskQueue string, opts sdkworker.Options) sdkworker.Worker {
 	w := sdkworker.New(r.client, taskQueue, opts)
 	r.workers = append(r.workers, w)
 	return w
 }
 
-// Start calls Start() on every registered worker.
-// It must be called after all workflows and activities have been registered
-// and before the HTTP server begins accepting traffic.
+// Start starts all registered workers. Workers begin polling their task queues.
+// This MUST be called before the HTTP server starts listening so that Temporal
+// workflows are ready to accept tasks from the moment the process is healthy.
 func (r *Registry) Start() error {
-	for _, w := range r.workers {
+	for i, w := range r.workers {
 		if err := w.Start(); err != nil {
-			return err
+			// Stop already-started workers to avoid dangling goroutines.
+			for j := 0; j < i; j++ {
+				r.workers[j].Stop()
+			}
+			return fmt.Errorf("start worker %d: %w", i, err)
 		}
 	}
 	return nil
 }
 
-// Stop gracefully stops all registered workers.
-// It is safe to call even when no workers have been registered.
+// Stop stops all registered workers gracefully, waiting for in-progress activities
+// and workflows to complete.
 func (r *Registry) Stop() {
-	for _, w := range r.workers {
-		w.Stop()
+	// Stop in reverse order for clean shutdown.
+	for i := len(r.workers) - 1; i >= 0; i-- {
+		r.workers[i].Stop()
 	}
+}
+
+// Client returns the underlying Temporal client, useful for schedule management.
+func (r *Registry) Client() client.Client {
+	return r.client
 }
