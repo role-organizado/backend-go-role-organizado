@@ -196,7 +196,7 @@ func (r *EventoRepository) findPaginated(ctx context.Context, filter bson.D, pag
 // Save inserts a new event. Uses UUID binary for _id (matches Java schema); stores usuario_id_responsavel as UUID binary.
 func (r *EventoRepository) Save(ctx context.Context, e *domain.Evento) (*domain.Evento, error) {
 	// Use UUID binary for _id so that the ID can be used as binData in rateio.evento_id
-	newID := uuidStringToBinary(uuid.New().String())
+	newID := UUIDStringToBinary(uuid.New().String())
 	now := time.Now().UTC()
 	status := string(e.Status)
 	if status == "" {
