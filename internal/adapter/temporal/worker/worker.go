@@ -61,3 +61,13 @@ func (r *Registry) RegisterFinanceReconciliationWorker(javaBackendURL string) {
 	w.RegisterWorkflow(temporalworkflow.FinanceReconciliationWorkflow)
 	w.RegisterActivity(activities)
 }
+
+// OverdueInstallmentQueue is the Temporal task queue for overdue installment workers.
+const OverdueInstallmentQueue = "OVERDUE_INSTALLMENT_QUEUE"
+
+// RegisterOverdueInstallmentWorker registers the OverdueInstallment workflow and activities.
+func (r *Registry) RegisterOverdueInstallmentWorker(acts *temporalactivity.OverdueInstallmentActivities) {
+	w := r.NewWorker(OverdueInstallmentQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.OverdueInstallmentWorkflow)
+	w.RegisterActivity(acts)
+}
