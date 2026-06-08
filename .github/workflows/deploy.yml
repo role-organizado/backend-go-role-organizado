@@ -21,7 +21,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: rodrigoroldan/backend-go-role-organizado
+  IMAGE_NAME: role-organizado/backend-go-role-organizado
   GO_VERSION: "1.24"
 
 jobs:
