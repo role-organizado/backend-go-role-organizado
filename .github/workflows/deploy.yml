@@ -163,17 +163,31 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🔑 Resolve Infisical Project
-        id: infisical
-        uses: role-organizado/role-organizado-workspace/.github/actions/resolve-infisical-project@main
-        with:
-          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
-          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+      - name: 🔑 Resolve Infisical Project (inline)
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        run: |
+          INFISICAL_URL="http://10.11.12.230:8080"
+
+          TOKEN=$(curl -sf -X POST "$INFISICAL_URL/api/v1/auth/universal-auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"clientId\":\"$INFISICAL_CLIENT_ID\",\"clientSecret\":\"$INFISICAL_CLIENT_SECRET\"}" \
+            | jq -r '.accessToken // empty')
+          if [ -z "$TOKEN" ]; then echo "❌ ERRO: login Infisical falhou"; exit 1; fi
+          echo "::add-mask::$TOKEN"
+
+          PROJECT_ID=$(curl -sf "$INFISICAL_URL/api/v1/workspace" \
+            -H "Authorization: Bearer $TOKEN" \
+            | jq -r '.workspaces[] | select(.name=="backend-go-role-organizado") | .id' | head -1)
+          if [ -z "$PROJECT_ID" ]; then echo "❌ ERRO: projeto backend-go-role-organizado não encontrado"; exit 1; fi
+
+          echo "INFISICAL_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "INFISICAL_PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
+          echo "✅ Project ID resolvido: $PROJECT_ID"
 
       - name: 🔐 Fetch secrets from Infisical
         env:
-          INFISICAL_TOKEN: ${{ steps.infisical.outputs.token }}
-          INFISICAL_PROJECT_ID: ${{ steps.infisical.outputs.project-id }}
           ENV_SLUG: ${{ github.event.inputs.environment == 'production' && 'prod' || github.event.inputs.environment == 'staging' && 'staging' || github.event.inputs.environment == 'development' && 'dev' || github.ref == 'refs/heads/main' && 'prod' || github.ref == 'refs/heads/staging' && 'staging' || 'dev' }}
         run: |
           INFISICAL_URL="http://10.11.12.230:8080"
@@ -429,17 +443,30 @@ jobs:
       name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/staging' && 'staging') || 'development' }}
 
     steps:
-      - name: 🔑 Resolve Infisical Project
-        id: infisical
-        uses: role-organizado/role-organizado-workspace/.github/actions/resolve-infisical-project@main
-        with:
-          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
-          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+      - name: 🔑 Resolve Infisical Project (inline)
+        env:
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        run: |
+          INFISICAL_URL="http://10.11.12.230:8080"
+
+          TOKEN=$(curl -sf -X POST "$INFISICAL_URL/api/v1/auth/universal-auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"clientId\":\"$INFISICAL_CLIENT_ID\",\"clientSecret\":\"$INFISICAL_CLIENT_SECRET\"}" \
+            | jq -r '.accessToken // empty')
+          if [ -z "$TOKEN" ]; then echo "❌ ERRO: login Infisical falhou"; exit 1; fi
+          echo "::add-mask::$TOKEN"
+
+          PROJECT_ID=$(curl -sf "$INFISICAL_URL/api/v1/workspace" \
+            -H "Authorization: Bearer $TOKEN" \
+            | jq -r '.workspaces[] | select(.name=="backend-go-role-organizado") | .id' | head -1)
+          if [ -z "$PROJECT_ID" ]; then echo "❌ ERRO: projeto backend-go-role-organizado não encontrado"; exit 1; fi
+
+          echo "INFISICAL_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "INFISICAL_PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
 
       - name: 🔐 Fetch secrets from Infisical
         env:
-          INFISICAL_TOKEN: ${{ steps.infisical.outputs.token }}
-          INFISICAL_PROJECT_ID: ${{ steps.infisical.outputs.project-id }}
           ENV_SLUG: ${{ github.event.inputs.environment == 'production' && 'prod' || github.event.inputs.environment == 'staging' && 'staging' || github.event.inputs.environment == 'development' && 'dev' || github.ref == 'refs/heads/main' && 'prod' || github.ref == 'refs/heads/staging' && 'staging' || 'dev' }}
         run: |
           INFISICAL_URL="http://10.11.12.230:8080"
