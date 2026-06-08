@@ -13,7 +13,7 @@
 
 services:
   app:
-    image: ghcr.io/rodrigoroldan/backend-go-role-organizado:${IMAGE_TAG:-latest}
+    image: ghcr.io/role-organizado/backend-go-role-organizado:${IMAGE_TAG:-latest}
     container_name: backend-go-role-organizado
     restart: unless-stopped
     # network_mode: host é NECESSÁRIO para Docker rodando dentro de LXC no Proxmox
