@@ -1,0 +1,484 @@
+name: 🚀 Build and Deploy Backend Go to Proxmox
+
+on:
+  push:
+    branches: [main, staging, develop]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Ambiente alvo do deploy"
+        required: false
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: rodrigoroldan/backend-go-role-organizado
+  GO_VERSION: "1.24"
+
+jobs:
+  # ==================================================
+  # JOB 1: TEST (lint + unit tests)
+  # ==================================================
+  test:
+    name: 🧪 Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐹 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: 🔍 Go vet
+        run: go vet ./...
+
+      - name: 🧹 Lint (golangci-lint)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: 🧪 Run unit tests
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./pkg/... ./internal/...
+
+      - name: 📊 Coverage report
+        run: go tool cover -func=coverage.out | tail -1
+
+  # ==================================================
+  # JOB 2: BUILD (Docker → GHCR)
+  # ==================================================
+  build:
+    name: 🐳 Build Docker Image
+    needs: test
+    runs-on: [self-hosted, backend]
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/staging' ||
+        github.ref == 'refs/heads/develop' ||
+        startsWith(github.ref, 'refs/tags/v')
+      ))
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+      image-full: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: 🧹 Clean workspace (self-hosted runner)
+        run: |
+          WORK_DIR="${GITHUB_WORKSPACE}"
+          cd ..
+          rm -rf "${WORK_DIR}" || true
+          mkdir -p "${WORK_DIR}"
+          cd "${WORK_DIR}"
+          echo "✅ Workspace limpo"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+            image=moby/buildkit:latest
+
+      - name: 🔑 Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # CACHE STRATEGY: 100% local (runner self-hosted já tem cache Docker nativo)
+      - name: 🔨 Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=local,src=/tmp/.buildx-cache-backend-go
+          cache-to: type=local,dest=/tmp/.buildx-cache-backend-go-new,mode=max
+
+      - name: 🔄 Move Docker cache to permanent location
+        if: always()
+        shell: bash
+        run: |
+          rm -rf /tmp/.buildx-cache-backend-go || true
+          mv /tmp/.buildx-cache-backend-go-new /tmp/.buildx-cache-backend-go || true
+          echo "✅ Build cache atualizado"
+
+      - name: 📊 Build Summary
+        run: |
+          echo "### 🐳 Docker image criada com sucesso!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags geradas:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # ==================================================
+  # JOB 3: DEPLOY (Runner self-hosted no Proxmox)
+  # Deploy para production (main), staging (staging) ou development (develop)
+  # ==================================================
+  deploy:
+    name: 🚀 Deploy to Proxmox LXC
+    needs: build
+    runs-on: [self-hosted, backend]
+    environment:
+      name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/staging' && 'staging') || 'development' }}
+    # TARGET_HOST e demais vars vêm do Infisical (Infisical é a única fonte de secrets).
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔑 Resolve Infisical Project
+        id: infisical
+        uses: rodrigoroldan/role-organizado-workspace/.github/actions/resolve-infisical-project@main
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+
+      - name: 🔐 Fetch secrets from Infisical
+        env:
+          INFISICAL_TOKEN: ${{ steps.infisical.outputs.token }}
+          INFISICAL_PROJECT_ID: ${{ steps.infisical.outputs.project-id }}
+          ENV_SLUG: ${{ github.event.inputs.environment == 'production' && 'prod' || github.event.inputs.environment == 'staging' && 'staging' || github.event.inputs.environment == 'development' && 'dev' || github.ref == 'refs/heads/main' && 'prod' || github.ref == 'refs/heads/staging' && 'staging' || 'dev' }}
+        run: |
+          INFISICAL_URL="http://10.11.12.230:8080"
+
+          SECRETS_JSON=$(curl -sf \
+            "$INFISICAL_URL/api/v3/secrets/raw?workspaceId=$INFISICAL_PROJECT_ID&environment=$ENV_SLUG&secretPath=/" \
+            -H "Authorization: Bearer $INFISICAL_TOKEN")
+
+          while IFS= read -r entry; do
+            KEY=$(echo "$entry" | jq -r '.secretKey')
+            VALUE=$(echo "$entry" | jq -r '.secretValue')
+            if [ -z "$KEY" ] || [ "$KEY" = "null" ]; then continue; fi
+            # Não mascarar TARGET_HOST — IP interno deve ser visível no summary de deploy
+            if [[ "$KEY" != "TARGET_HOST" ]]; then
+              echo "::add-mask::$VALUE"
+              echo "$VALUE" | while IFS= read -r line; do [ -n "$line" ] && echo "::add-mask::$line"; done
+            fi
+            printf '%s<<_INFISICAL_EOF_\n%s\n_INFISICAL_EOF_\n' "$KEY" "$VALUE" >> $GITHUB_ENV
+          done < <(echo "$SECRETS_JSON" | jq -c '.secrets[]')
+
+          echo "ENV_SLUG=$ENV_SLUG" >> $GITHUB_ENV
+          echo "✅ $(echo "$SECRETS_JSON" | jq '.secrets | length') secrets carregados do Infisical ($ENV_SLUG)"
+
+      - name: 🔧 Set environment variables
+        run: |
+          echo "IMAGE_TAG=${{ needs.build.outputs.image-tag }}" >> $GITHUB_ENV
+          echo "DEPLOY_PATH=/opt/role-organizado-go" >> $GITHUB_ENV
+          echo "DEPLOY_USER=deploy" >> $GITHUB_ENV
+
+          # Environment name: input do workflow_dispatch tem prioridade
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.environment }}" ]; then
+            echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "ENVIRONMENT=production" >> $GITHUB_ENV
+          elif [ "${{ github.ref }}" == "refs/heads/staging" ]; then
+            echo "ENVIRONMENT=staging" >> $GITHUB_ENV
+          else
+            echo "ENVIRONMENT=development" >> $GITHUB_ENV
+          fi
+
+      - name: 🚀 Deploy to application LXC (${{ env.ENVIRONMENT }})
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          echo "🚀 Iniciando deploy no LXC $TARGET_HOST ($ENVIRONMENT)..."
+
+          require_var() {
+            local name="$1"
+            local value="${!name:-}"
+            if [ -z "$value" ]; then
+              echo "❌ ERRO: variável obrigatória ausente: $name (Infisical env=$ENV_SLUG)"
+              exit 1
+            fi
+          }
+
+          # Contrato estrito de secrets (mesmos átomos do projeto Java/iac)
+          require_var "TARGET_HOST"
+          require_var "JWT_SECRET"
+          require_var "MONGODB_HOST"
+          require_var "MONGODB_PORT"
+          require_var "MONGODB_DATABASE"
+          require_var "MONGODB_USERNAME"
+          require_var "MONGODB_PASSWORD"
+          require_var "MONGODB_REPLICA_SET"
+          require_var "MONGODB_AUTH_SOURCE"
+          require_var "REDIS_HOST"
+          require_var "REDIS_PORT"
+          require_var "REDIS_PASSWORD"
+          require_var "IMAGE_TAG"
+
+          # Temporal: aceitar contrato novo (TEMPORAL_HOST/TEMPORAL_PORT) e legado (TEMPORAL_TARGET)
+          if [ -n "${TEMPORAL_HOST:-}" ] && [ -n "${TEMPORAL_PORT:-}" ]; then
+            EFFECTIVE_TEMPORAL_HOST_PORT="${TEMPORAL_HOST}:${TEMPORAL_PORT}"
+          elif [ -n "${TEMPORAL_TARGET:-}" ]; then
+            EFFECTIVE_TEMPORAL_HOST_PORT="${TEMPORAL_TARGET}"
+          else
+            echo "❌ ERRO: informe TEMPORAL_HOST+TEMPORAL_PORT ou TEMPORAL_TARGET"
+            exit 1
+          fi
+
+          # Montar Mongo URI (mesmo padrão do backend Java: atoms + URL-encoding)
+          ENCODED_MONGODB_USERNAME=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1], safe=''))" "$MONGODB_USERNAME")
+          ENCODED_MONGODB_PASSWORD=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1], safe=''))" "$MONGODB_PASSWORD")
+          # Docker Compose interpola '$' em .env; escapar para preservar valor literal
+          ESCAPED_MONGODB_USERNAME=$(printf '%s' "$ENCODED_MONGODB_USERNAME" | sed 's/\$/\$\$/g')
+          ESCAPED_MONGODB_PASSWORD=$(printf '%s' "$ENCODED_MONGODB_PASSWORD" | sed 's/\$/\$\$/g')
+          EFFECTIVE_MONGO_URI="mongodb://${ESCAPED_MONGODB_USERNAME}:${ESCAPED_MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/${MONGODB_DATABASE}?authSource=${MONGODB_AUTH_SOURCE}&replicaSet=${MONGODB_REPLICA_SET}"
+
+          ESCAPED_JWT_SECRET=$(printf '%s' "$JWT_SECRET" | sed 's/\$/\$\$/g')
+          ESCAPED_ASAAS_API_KEY=$(printf '%s' "${ASAAS_API_KEY:-}" | sed 's/\$/\$\$/g')
+
+          # Resolver atributos por ambiente
+          EFFECTIVE_SERVER_ENV="staging"
+          if [ "$ENVIRONMENT" = "production" ]; then
+            EFFECTIVE_SERVER_ENV="production"
+          elif [ "$ENVIRONMENT" = "development" ]; then
+            EFFECTIVE_SERVER_ENV="development"
+          fi
+
+          # Criar arquivo .env localmente com todas as variáveis já expandidas
+          echo "📝 Criando arquivo .env local com configurações..."
+          {
+            echo "IMAGE_TAG=${IMAGE_TAG}"
+            echo "ROLE_SERVER_PORT=${ROLE_SERVER_PORT:-8090}"
+            echo "ROLE_SERVER_ENV=${EFFECTIVE_SERVER_ENV}"
+            echo "ROLE_SERVER_CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:4300}"
+            echo "ROLE_SERVER_JAVA_BACKEND_URL=${JAVA_BACKEND_URL:-http://localhost:8080}"
+            echo "ROLE_MONGO_URI=${EFFECTIVE_MONGO_URI}"
+            echo "ROLE_MONGO_DATABASE=${MONGODB_DATABASE}"
+            echo "ROLE_JWT_SECRET=${ESCAPED_JWT_SECRET}"
+            echo "ROLE_OTEL_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+            echo "ROLE_OTEL_ENABLED=${ROLE_OTEL_ENABLED:-false}"
+            echo "ROLE_OTEL_SERVICE_NAME=backend-go-role-organizado"
+            echo "ROLE_TEMPORAL_HOST_PORT=${EFFECTIVE_TEMPORAL_HOST_PORT}"
+            echo "ROLE_TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}"
+            echo "ROLE_TEMPORAL_WORKER_ENABLED=${ROLE_TEMPORAL_WORKER_ENABLED:-false}"
+            echo "ROLE_REDIS_ADDR=${REDIS_HOST}:${REDIS_PORT}"
+            echo "ROLE_REDIS_PASSWORD=${REDIS_PASSWORD}"
+            echo "ROLE_REDIS_DB=${REDIS_DB:-0}"
+            echo "ROLE_ASAAS_USE_MOCK=${PAYMENT_USE_MOCK:-true}"
+            echo "ROLE_ASAAS_BASE_URL=${ASAAS_BASE_URL:-https://sandbox.asaas.com/api/v3}"
+            echo "ROLE_ASAAS_API_KEY=${ESCAPED_ASAAS_API_KEY}"
+            echo "ROLE_ASAAS_WEBHOOK_TOKEN=${ASAAS_WEBHOOK_TOKEN:-}"
+            echo "ROLE_SQS_REGION=${AWS_REGION:-us-east-1}"
+            echo "ROLE_SQS_QUEUE_URL=${AWS_SQS_QUEUE_URL:-}"
+          } > /tmp/.env.deploy-go
+
+          # Validar variáveis críticas localmente
+          echo "🔍 Validando variáveis críticas localmente..."
+          echo "Conteúdo do .env gerado (mascarado):"
+          cat /tmp/.env.deploy-go | sed 's/=.*/=***/'
+
+          for required in IMAGE_TAG ROLE_JWT_SECRET ROLE_MONGO_URI; do
+            if ! grep -q "^${required}=" /tmp/.env.deploy-go; then
+              echo "❌ ERRO: ${required} não encontrada no .env!"
+              exit 1
+            fi
+            echo "✅ ${required} presente"
+          done
+
+          # Configurar SSH key
+          echo "🔑 Configurando SSH key para deploy..."
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          # Preferir chave nativa do runner; fallback para secret
+          if [ -f ~/.ssh/id_ed25519 ]; then
+            cp ~/.ssh/id_ed25519 ~/.ssh/deploy_key_go
+          else
+            printf '%s\n' "$APP_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key_go
+          fi
+          chmod 600 ~/.ssh/deploy_key_go
+          ssh-keyscan -H $TARGET_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o BatchMode=yes"
+
+          # Criar diretório de deploy no LXC
+          echo "📁 Criando diretórios no servidor..."
+          ssh -i ~/.ssh/deploy_key_go ${SSH_OPTS} ${DEPLOY_USER}@${TARGET_HOST} \
+            "sudo mkdir -p ${DEPLOY_PATH} && sudo chown -R ${DEPLOY_USER}:${DEPLOY_USER} ${DEPLOY_PATH}"
+
+          # Copiar compose + .env
+          echo "📤 Copiando arquivos de configuração..."
+          scp -i ~/.ssh/deploy_key_go ${SSH_OPTS} \
+            deploy/docker-compose.prod.yml \
+            ${DEPLOY_USER}@${TARGET_HOST}:${DEPLOY_PATH}/
+          scp -i ~/.ssh/deploy_key_go ${SSH_OPTS} \
+            /tmp/.env.deploy-go \
+            ${DEPLOY_USER}@${TARGET_HOST}:${DEPLOY_PATH}/.env
+
+          # SSH para o LXC e executar deploy
+          echo "🔧 Executando deploy remoto..."
+          ssh -i ~/.ssh/deploy_key_go ${SSH_OPTS} ${DEPLOY_USER}@${TARGET_HOST} \
+            GITHUB_TOKEN="${GITHUB_TOKEN}" \
+            GITHUB_ACTOR="${GITHUB_ACTOR}" \
+            DEPLOY_PATH="${DEPLOY_PATH}" \
+            bash << 'ENDSSH'
+            set -e
+            set -o pipefail
+            cd ${DEPLOY_PATH}
+
+            if [ ! -f .env ]; then
+              echo "❌ ERRO: Arquivo .env não foi copiado!"
+              exit 1
+            fi
+
+            echo "🔑 Fazendo login no GitHub Container Registry..."
+            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+
+            echo "📥 Baixando nova imagem..."
+            docker compose -f docker-compose.prod.yml pull app
+
+            echo "🛑 Parando container antigo..."
+            docker compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+
+            echo "♻️ Recriando container da aplicação..."
+            docker compose -f docker-compose.prod.yml up -d --force-recreate --remove-orphans
+
+            # Readiness: imagem distroless não tem curl/shell — validar do host do LXC
+            # (network_mode: host => app escuta direto na 8090 do host)
+            echo "⏳ Aguardando endpoint de health ficar disponível..."
+            READY=0
+            for i in $(seq 1 24); do
+              if curl -fsS http://localhost:8090/actuator/health >/dev/null 2>&1; then
+                READY=1
+                break
+              fi
+              sleep 5
+            done
+
+            if [ "$READY" -ne 1 ]; then
+              echo "❌ ERRO: aplicação não respondeu no health endpoint dentro do tempo esperado!"
+              echo "📋 Logs da aplicação:"
+              docker compose -f docker-compose.prod.yml logs --tail=120 app
+              echo "📊 Status do container:"
+              docker compose -f docker-compose.prod.yml ps
+              curl -v http://localhost:8090/actuator/health || true
+              exit 1
+            fi
+
+            echo "✅ Aplicação iniciada com sucesso!"
+            echo "📊 Status do container:"
+            docker compose -f docker-compose.prod.yml ps
+            echo "📋 Últimas linhas do log:"
+            docker compose -f docker-compose.prod.yml logs --tail=20 app
+            echo "🔍 Resposta do health endpoint:"
+            curl -s http://localhost:8090/actuator/health 2>/dev/null || true
+            echo "✅ Deploy concluído!"
+          ENDSSH
+
+          echo "✅ Deploy SSH executado com sucesso!"
+
+      - name: 📊 Deployment Summary
+        if: success()
+        run: |
+          echo "### 🎉 Deploy realizado com sucesso!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Host**: $TARGET_HOST" >> $GITHUB_STEP_SUMMARY
+          echo "- **Versão**: ${{ needs.build.outputs.image-tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Health Check**: ✅ http://$TARGET_HOST:8090/actuator/health" >> $GITHUB_STEP_SUMMARY
+
+  # ==================================================
+  # JOB 4: SMOKE TESTS
+  # ==================================================
+  smoke-test:
+    name: 🔥 Smoke Tests
+    needs: deploy
+    runs-on: [self-hosted, backend]
+    environment:
+      name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/staging' && 'staging') || 'development' }}
+
+    steps:
+      - name: 🔑 Resolve Infisical Project
+        id: infisical
+        uses: rodrigoroldan/role-organizado-workspace/.github/actions/resolve-infisical-project@main
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+
+      - name: 🔐 Fetch secrets from Infisical
+        env:
+          INFISICAL_TOKEN: ${{ steps.infisical.outputs.token }}
+          INFISICAL_PROJECT_ID: ${{ steps.infisical.outputs.project-id }}
+          ENV_SLUG: ${{ github.event.inputs.environment == 'production' && 'prod' || github.event.inputs.environment == 'staging' && 'staging' || github.event.inputs.environment == 'development' && 'dev' || github.ref == 'refs/heads/main' && 'prod' || github.ref == 'refs/heads/staging' && 'staging' || 'dev' }}
+        run: |
+          INFISICAL_URL="http://10.11.12.230:8080"
+
+          SECRETS_JSON=$(curl -sf \
+            "$INFISICAL_URL/api/v3/secrets/raw?workspaceId=$INFISICAL_PROJECT_ID&environment=$ENV_SLUG&secretPath=/" \
+            -H "Authorization: Bearer $INFISICAL_TOKEN")
+
+          TARGET_HOST=$(echo "$SECRETS_JSON" | jq -r '.secrets[] | select(.secretKey=="TARGET_HOST") | .secretValue')
+          if [ -z "$TARGET_HOST" ] || [ "$TARGET_HOST" = "null" ]; then
+            echo "❌ ERRO: TARGET_HOST não encontrado no Infisical ($ENV_SLUG)"
+            exit 1
+          fi
+          echo "TARGET_HOST=$TARGET_HOST" >> $GITHUB_ENV
+
+      - name: 🔥 Run smoke tests
+        run: |
+          echo "🔥 Executando smoke tests contra $TARGET_HOST:8090..."
+
+          # 1. Health endpoint responde 200 e status UP
+          HEALTH=$(curl -fsS --max-time 10 "http://$TARGET_HOST:8090/actuator/health")
+          echo "Health response: $HEALTH"
+          STATUS=$(echo "$HEALTH" | jq -r '.status')
+          if [ "$STATUS" != "UP" ]; then
+            echo "❌ ERRO: health status = $STATUS (esperado UP)"
+            exit 1
+          fi
+          echo "✅ Health: UP"
+
+          # 2. Mongo component UP (quando exposto)
+          MONGO_STATUS=$(echo "$HEALTH" | jq -r '.components.mongo.status // "N/A"')
+          echo "✅ Mongo component: $MONGO_STATUS"
+
+          echo "✅ Smoke tests concluídos!"
+
+      - name: 📊 Smoke Test Summary
+        if: success()
+        run: |
+          echo "### 🔥 Smoke tests passaram!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Host**: $TARGET_HOST:8090" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health**: ✅ UP" >> $GITHUB_STEP_SUMMARY
