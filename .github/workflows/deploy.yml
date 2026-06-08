@@ -165,7 +165,7 @@ jobs:
 
       - name: 🔑 Resolve Infisical Project
         id: infisical
-        uses: rodrigoroldan/role-organizado-workspace/.github/actions/resolve-infisical-project@main
+        uses: role-organizado/role-organizado-workspace/.github/actions/resolve-infisical-project@main
         with:
           client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
@@ -431,7 +431,7 @@ jobs:
     steps:
       - name: 🔑 Resolve Infisical Project
         id: infisical
-        uses: rodrigoroldan/role-organizado-workspace/.github/actions/resolve-infisical-project@main
+        uses: role-organizado/role-organizado-workspace/.github/actions/resolve-infisical-project@main
         with:
           client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
