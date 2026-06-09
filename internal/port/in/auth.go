@@ -74,10 +74,12 @@ type AppleAuthUseCase interface {
 
 // UpdateUsuarioInput is the payload for user profile updates.
 type UpdateUsuarioInput struct {
-	Nome        string
-	FotoPerfil  string
-	Telefone    *auth.Telefone
-	Endereco    *auth.Endereco
+	Nome       string
+	Email      string
+	CPF        string
+	FotoPerfil string
+	Telefone   *auth.Telefone
+	Endereco   *auth.Endereco
 }
 
 // UpdateUsuarioUseCase updates an existing user profile.

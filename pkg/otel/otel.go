@@ -21,6 +21,53 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
+// teeHandler fans out slog records to multiple handlers simultaneously.
+type teeHandler struct {
+	handlers []goslog.Handler
+}
+
+func (t *teeHandler) Enabled(ctx context.Context, level goslog.Level) bool {
+	for _, h := range t.handlers {
+		if h.Enabled(ctx, level) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *teeHandler) Handle(ctx context.Context, r goslog.Record) error {
+	for _, h := range t.handlers {
+		if h.Enabled(ctx, r.Level) {
+			_ = h.Handle(ctx, r)
+		}
+	}
+	return nil
+}
+
+func (t *teeHandler) WithAttrs(attrs []goslog.Attr) goslog.Handler {
+	hs := make([]goslog.Handler, len(t.handlers))
+	for i, h := range t.handlers {
+		hs[i] = h.WithAttrs(attrs)
+	}
+	return &teeHandler{handlers: hs}
+}
+
+func (t *teeHandler) WithGroup(name string) goslog.Handler {
+	hs := make([]goslog.Handler, len(t.handlers))
+	for i, h := range t.handlers {
+		hs[i] = h.WithGroup(name)
+	}
+	return &teeHandler{handlers: hs}
+}
+
+// NewTeeHandler returns an slog.Handler that writes to both the provided JSON handler
+// (stdout) and the OTEL bridge simultaneously, so logs land in both places when OTEL
+// is enabled.
+func NewTeeHandler(lp *sdklog.LoggerProvider, jsonHandler goslog.Handler) goslog.Handler {
+	otelHandler := otelslog.NewHandler("backend-go-role-organizado", otelslog.WithLoggerProvider(lp))
+	return &teeHandler{handlers: []goslog.Handler{jsonHandler, otelHandler}}
+}
+
 // Config holds the OTel SDK configuration.
 type Config struct {
 	// OTLPEndpoint is the OTLP HTTP collector endpoint (e.g. "http://otel-staging.rolds.dev:4318").

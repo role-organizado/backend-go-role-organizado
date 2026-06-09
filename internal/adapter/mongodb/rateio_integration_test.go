@@ -14,14 +14,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Use valid UUID strings — rateioDocument stores evento_id / usuario_id_responsavel
+// as bson.Binary subtype 4.  uuidStringToBinary falls back to uuid.New() (random)
+// for non-UUID inputs, so each call produces a different binary and queries never match.
+const (
+	testEventoUUID  = "550e8400-e29b-41d4-a716-446655440000"
+	testUsuarioUUID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	testEvtListUUID = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+	testEvtDelUUID  = "a6c8e2d4-1f3b-4e5a-8c7d-9e0f1a2b3c4d"
+	testUsrDelUUID  = "b7d9f3e5-2a4c-5f6b-9d8e-0f1a2b3c4d5e"
+)
+
 func TestRateioRepository_SaveAndFindByID(t *testing.T) {
 	client := testhelper.StartMongo(t)
 	repo := mongodb.NewRateioRepository(client)
 	ctx := context.Background()
 
 	rat := &rateioDomain.Rateio{
-		EventoID:   "evt-001",
-		UsuarioID:  "usr-001",
+		EventoID:   testEventoUUID,
+		UsuarioID:  testUsuarioUUID,
 		Tipo:       rateioDomain.TipoRateioDivisao,
 		ValorTotal: 150.00,
 	}
@@ -33,8 +44,11 @@ func TestRateioRepository_SaveAndFindByID(t *testing.T) {
 
 	found, err := repo.FindByID(ctx, saved.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "evt-001", found.EventoID)
+	// EventoID round-trips through bson.Binary → UUID string correctly
+	assert.Equal(t, testEventoUUID, found.EventoID)
 	assert.Equal(t, rateioDomain.TipoRateioDivisao, found.Tipo)
+	// UsuarioID round-trips correctly
+	assert.Equal(t, testUsuarioUUID, found.UsuarioID)
 }
 
 func TestRateioRepository_FindByEventoID(t *testing.T) {
@@ -44,17 +58,31 @@ func TestRateioRepository_FindByEventoID(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		_, err := repo.Save(ctx, &rateioDomain.Rateio{
-			EventoID:   "evt-list",
-			UsuarioID:  "usr-001",
+			EventoID:   testEvtListUUID,
+			UsuarioID:  testUsuarioUUID,
 			Tipo:       rateioDomain.TipoRateioPercentual,
 			ValorTotal: 100.0,
 		})
 		require.NoError(t, err)
 	}
 
-	rateios, err := repo.FindByEventoID(ctx, "evt-list")
+	// Save one rateio for a DIFFERENT event — must not appear in results
+	_, err := repo.Save(ctx, &rateioDomain.Rateio{
+		EventoID:   testEventoUUID,
+		UsuarioID:  testUsuarioUUID,
+		Tipo:       rateioDomain.TipoRateioDivisao,
+		ValorTotal: 50.0,
+	})
+	require.NoError(t, err)
+
+	rateios, err := repo.FindByEventoID(ctx, testEvtListUUID)
 	require.NoError(t, err)
 	assert.Len(t, rateios, 3)
+
+	// Verify each returned rateio has the correct EventoID
+	for _, r := range rateios {
+		assert.Equal(t, testEvtListUUID, r.EventoID)
+	}
 }
 
 func TestRateioRepository_DeleteByID(t *testing.T) {
@@ -63,8 +91,8 @@ func TestRateioRepository_DeleteByID(t *testing.T) {
 	ctx := context.Background()
 
 	saved, err := repo.Save(ctx, &rateioDomain.Rateio{
-		EventoID:   "evt-del",
-		UsuarioID:  "usr-del",
+		EventoID:   testEvtDelUUID,
+		UsuarioID:  testUsrDelUUID,
 		Tipo:       rateioDomain.TipoRateioItens,
 		ValorTotal: 200.0,
 	})

@@ -47,6 +47,12 @@ func (uc *UpdateUsuario) Execute(ctx context.Context, usuarioID string, in porti
 	if in.Nome != "" {
 		usuario.Nome = in.Nome
 	}
+	if in.Email != "" {
+		usuario.Email = in.Email
+	}
+	if in.CPF != "" {
+		usuario.CPF = in.CPF
+	}
 	if in.FotoPerfil != "" {
 		usuario.FotoPerfil = in.FotoPerfil
 	}

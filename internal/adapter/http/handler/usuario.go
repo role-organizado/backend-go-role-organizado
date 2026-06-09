@@ -1,25 +1,29 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
-	"github.com/role-organizado/backend-go-role-organizado/internal/domain/auth"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
+	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
+	"github.com/role-organizado/backend-go-role-organizado/internal/domain/auth"
 	portin "github.com/role-organizado/backend-go-role-organizado/internal/port/in"
 	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
 
 // UsuarioHandler handles HTTP requests for the Usuario resource.
 type UsuarioHandler struct {
-	getUsuario     portin.GetUsuarioUseCase
-	updateUsuario  portin.UpdateUsuarioUseCase
-	listUsuarios   portin.ListUsuariosUseCase
-	updateRole     portin.UpdateUserRoleUseCase
+	getUsuario    portin.GetUsuarioUseCase
+	updateUsuario portin.UpdateUsuarioUseCase
+	listUsuarios  portin.ListUsuariosUseCase
+	updateRole    portin.UpdateUserRoleUseCase
+	mongo         *mongodb.Client
 }
 
 // NewUsuarioHandler creates a new UsuarioHandler.
@@ -28,12 +32,14 @@ func NewUsuarioHandler(
 	update portin.UpdateUsuarioUseCase,
 	list portin.ListUsuariosUseCase,
 	updateRole portin.UpdateUserRoleUseCase,
+	mongo *mongodb.Client,
 ) *UsuarioHandler {
 	return &UsuarioHandler{
 		getUsuario:    get,
 		updateUsuario: update,
 		listUsuarios:  list,
 		updateRole:    updateRole,
+		mongo:         mongo,
 	}
 }
 
@@ -48,23 +54,30 @@ func (h *UsuarioHandler) RegisterRoutes(r chi.Router) {
 	// Legacy path aliases — same API surface as Java backend for BFF compatibility
 	r.Get("/api/usuarios/{id}", h.GetByID)
 	r.Put("/api/usuarios/{id}", h.UpdateByID)
+	r.Patch("/api/usuarios/{id}", h.UpdateByID)
+	r.Get("/api/usuarios/{id}/devices", h.GetDevices)
 }
 
 // ---- DTOs ----
 
 type usuarioDetailResponse struct {
-	ID             string     `json:"id"`
-	Nome           string     `json:"nome"`
-	Email          string     `json:"email"`
-	FotoPerfil     string     `json:"fotoPerfil,omitempty"`
-	Roles          []string   `json:"roles"`
-	Ativo          bool       `json:"ativo"`
-	CriadoEm      time.Time  `json:"criadoEm"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	ID         string              `json:"id"`
+	Nome       string              `json:"nome"`
+	Email      string              `json:"email"`
+	CPF        string              `json:"cpf,omitempty"`
+	FotoPerfil string              `json:"fotoPerfil,omitempty"`
+	Telefone   *telefoneReq        `json:"telefone,omitempty"`
+	Endereco   *enderecoReq        `json:"endereco,omitempty"`
+	Roles      []string            `json:"roles"`
+	Ativo      bool                `json:"ativo"`
+	CriadoEm  time.Time           `json:"criadoEm"`
+	UpdatedAt  time.Time           `json:"updatedAt"`
 }
 
 type updateUsuarioRequest struct {
 	Nome       string       `json:"nome"`
+	Email      string       `json:"email"`
+	CPF        string       `json:"cpf"`
 	FotoPerfil string       `json:"fotoPerfil"`
 	Telefone   *telefoneReq `json:"telefone"`
 	Endereco   *enderecoReq `json:"endereco"`
@@ -127,7 +140,7 @@ func (h *UsuarioHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
 		return
 	}
-	in := portin.UpdateUsuarioInput{Nome: req.Nome, FotoPerfil: req.FotoPerfil}
+	in := portin.UpdateUsuarioInput{Nome: req.Nome, Email: req.Email, CPF: req.CPF, FotoPerfil: req.FotoPerfil}
 	if req.Telefone != nil {
 		in.Telefone = &auth.Telefone{DDI: req.Telefone.DDI, DDD: req.Telefone.DDD, Numero: req.Telefone.Numero, Tipo: req.Telefone.Tipo}
 	}
@@ -165,7 +178,7 @@ func (h *UsuarioHandler) UpdateByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
 		return
 	}
-	in := portin.UpdateUsuarioInput{Nome: req.Nome, FotoPerfil: req.FotoPerfil}
+	in := portin.UpdateUsuarioInput{Nome: req.Nome, Email: req.Email, CPF: req.CPF, FotoPerfil: req.FotoPerfil}
 	if req.Telefone != nil {
 		in.Telefone = &auth.Telefone{DDI: req.Telefone.DDI, DDD: req.Telefone.DDD, Numero: req.Telefone.Numero, Tipo: req.Telefone.Tipo}
 	}
@@ -225,6 +238,63 @@ func (h *UsuarioHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toUsuarioDetailResponse(*u))
 }
 
+// deviceResponse represents a registered push-notification device.
+type deviceResponse struct {
+	DeviceID string `json:"deviceId"`
+	Platform string `json:"platform"`
+	Token    string `json:"token"`
+}
+
+// GetDevices handles GET /api/usuarios/{id}/devices.
+// Returns all push-notification devices registered for the given user.
+// Returns an empty array if the collection is empty or does not exist.
+func (h *UsuarioHandler) GetDevices(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+
+	// Graceful degradation: if mongo is not wired (e.g. in tests), return empty array.
+	if h.mongo == nil {
+		writeJSON(w, http.StatusOK, []deviceResponse{})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	// Try the most likely collection names used by Java.
+	// Primary: "devices", fallback handled by returning empty array on error.
+	col := h.mongo.Collection("devices")
+	cursor, err := col.Find(ctx, bson.M{"usuario_id": userID})
+	if err != nil {
+		writeJSON(w, http.StatusOK, []deviceResponse{})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var raw []bson.M
+	if err := cursor.All(ctx, &raw); err != nil || raw == nil {
+		writeJSON(w, http.StatusOK, []deviceResponse{})
+		return
+	}
+
+	devices := make([]deviceResponse, 0, len(raw))
+	for _, d := range raw {
+		dev := deviceResponse{}
+		if v, ok := d["device_id"].(string); ok {
+			dev.DeviceID = v
+		} else if v, ok := d["deviceId"].(string); ok {
+			dev.DeviceID = v
+		}
+		if v, ok := d["platform"].(string); ok {
+			dev.Platform = v
+		}
+		if v, ok := d["token"].(string); ok {
+			dev.Token = v
+		}
+		devices = append(devices, dev)
+	}
+	writeJSON(w, http.StatusOK, devices)
+}
+
 // ---- mapper ----
 
 func toUsuarioDetailResponse(u auth.Usuario) usuarioDetailResponse {
@@ -232,14 +302,25 @@ func toUsuarioDetailResponse(u auth.Usuario) usuarioDetailResponse {
 	for i, r := range u.Roles {
 		roles[i] = string(r)
 	}
-	return usuarioDetailResponse{
+	resp := usuarioDetailResponse{
 		ID:        u.ID,
 		Nome:      u.Nome,
 		Email:     u.Email,
+		CPF:       u.CPF,
 		FotoPerfil: u.FotoPerfil,
 		Roles:     roles,
 		Ativo:     u.Ativo,
 		CriadoEm: u.CriadoEm,
 		UpdatedAt: u.UpdatedAt,
 	}
+	if u.Telefone != nil {
+		resp.Telefone = &telefoneReq{DDI: u.Telefone.DDI, DDD: u.Telefone.DDD, Numero: u.Telefone.Numero, Tipo: u.Telefone.Tipo}
+	}
+	if u.Endereco != nil {
+		resp.Endereco = &enderecoReq{
+			Rua: u.Endereco.Rua, Numero: u.Endereco.Numero, Complemento: u.Endereco.Complemento,
+			Bairro: u.Endereco.Bairro, Cidade: u.Endereco.Cidade, Estado: u.Endereco.Estado, CEP: u.Endereco.CEP,
+		}
+	}
+	return resp
 }

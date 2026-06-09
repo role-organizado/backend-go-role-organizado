@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -185,24 +184,12 @@ func (h *RateioHandler) listRateiosByEvento(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	type rateioWrapper struct {
-		Rateio rateioResponse `json:"rateio"`
-	}
-	rateioItems := make([]rateioWrapper, len(rats))
+	rateioItems := make([]rateioResponse, len(rats))
 	for i, rat := range rats {
 		r2 := rat // copy
-		rateioItems[i] = rateioWrapper{Rateio: rateioToResponse(&r2)}
+		rateioItems[i] = rateioToResponse(&r2)
 	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"eventoId": eventoID,
-		"rateios":  rateioItems,
-		"metadata": map[string]interface{}{
-			"totalRateios": len(rateioItems),
-			"cacheHit":     false,
-			"timestamp":    time.Now().UTC().Format(time.RFC3339),
-		},
-	})
+	writeJSON(w, http.StatusOK, rateioItems)
 }
 
 func (h *RateioHandler) updateRateio(w http.ResponseWriter, r *http.Request) {

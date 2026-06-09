@@ -16,12 +16,13 @@ import (
 
 // EventHandler handles event-related HTTP requests.
 type EventHandler struct {
-	createUC         portin.CreateEventoUseCase
-	getUC            portin.GetEventoUseCase
-	listUC           portin.ListEventosUseCase
-	updateUC         portin.UpdateEventoUseCase
-	deleteUC         portin.DeleteEventoUseCase
-	listByUsuarioUC  portin.ListEventosByUsuarioUseCase
+	createUC        portin.CreateEventoUseCase
+	getUC           portin.GetEventoUseCase
+	listUC          portin.ListEventosUseCase
+	updateUC        portin.UpdateEventoUseCase
+	deleteUC        portin.DeleteEventoUseCase
+	listByUsuarioUC portin.ListEventosByUsuarioUseCase
+	addConvidadosUC portin.AddConvidadosUseCase
 }
 
 // NewEventHandler creates a new EventHandler.
@@ -32,6 +33,7 @@ func NewEventHandler(
 	update portin.UpdateEventoUseCase,
 	del portin.DeleteEventoUseCase,
 	listByUsuario portin.ListEventosByUsuarioUseCase,
+	addConvidados portin.AddConvidadosUseCase,
 ) *EventHandler {
 	return &EventHandler{
 		createUC:        create,
@@ -40,6 +42,7 @@ func NewEventHandler(
 		updateUC:        update,
 		deleteUC:        del,
 		listByUsuarioUC: listByUsuario,
+		addConvidadosUC: addConvidados,
 	}
 }
 
@@ -49,9 +52,13 @@ func (h *EventHandler) RegisterEventRoutes(r chi.Router) {
 	r.Post("/api/eventos", h.createEvento)
 	// /usuario/{usuarioId} must be registered before /{id} to avoid chi matching conflict
 	r.Get("/api/eventos/usuario/{usuarioId}", h.listEventoByUsuario)
+	// v1 versioned alias — same handler, identical behaviour
+	r.Get("/api/eventos/v1/eventos/usuario/{userId}", h.listEventoByUsuarioV1)
 	r.Get("/api/eventos/{id}", h.getEvento)
 	r.Put("/api/eventos/{id}", h.updateEvento)
 	r.Delete("/api/eventos/{id}", h.deleteEvento)
+	// Convidados
+	r.Post("/api/eventos/v1/eventos/{eventoId}/convidados", h.addConvidados)
 }
 
 // ---- request/response DTOs ----
@@ -115,6 +122,15 @@ type eventoResponse struct {
 	PoliticaCancelamento string     `json:"politicaCancelamento"`
 	CriadoEm             time.Time  `json:"criadoEm"`
 	UpdatedAt            time.Time  `json:"updatedAt"`
+}
+
+type addConvidadosRequest struct {
+	Convidados []convidadoRequest `json:"convidados"`
+}
+
+type convidadoRequest struct {
+	Telefone string `json:"telefone"`
+	Nome     string `json:"nome"`
 }
 
 // ---- handlers ----
@@ -298,6 +314,120 @@ func (h *EventHandler) deleteEvento(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// listEventoByUsuarioV1 handles GET /api/eventos/v1/eventos/usuario/{userId}.
+// It is an alias for listEventoByUsuario that reads from the {userId} chi param.
+func (h *EventHandler) listEventoByUsuarioV1(w http.ResponseWriter, r *http.Request) {
+	requesterID := middleware.UserIDFromContext(r.Context())
+	if requesterID == "" {
+		writeError(w, apierr.Unauthorized("autenticação necessária"))
+		return
+	}
+	usuarioID := chi.URLParam(r, "userId")
+	if usuarioID == "" {
+		writeError(w, apierr.BadRequest("userId é obrigatório"))
+		return
+	}
+
+	var cursor *string
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		cursor = &c
+	}
+	var status, tipo *string
+	if s := r.URL.Query().Get("status"); s != "" {
+		status = &s
+	}
+	if t := r.URL.Query().Get("tipo"); t != "" {
+		tipo = &t
+	}
+	var dataInicioGte, dataInicioLte *time.Time
+	if v := r.URL.Query().Get("dataInicioGte"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			dataInicioGte = &t
+		}
+	}
+	if v := r.URL.Query().Get("dataInicioLte"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			dataInicioLte = &t
+		}
+	}
+	limit := queryIntParam(r, "limit", 20)
+
+	in := portin.ListEventosByUsuarioInput{
+		UsuarioID:     usuarioID,
+		RequesterID:   requesterID,
+		Status:        status,
+		Tipo:          tipo,
+		DataInicioGte: dataInicioGte,
+		DataInicioLte: dataInicioLte,
+		Cursor:        cursor,
+		Limit:         limit,
+	}
+	page, err := h.listByUsuarioUC.Execute(r.Context(), in)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	resp := make([]eventoResponse, len(page.Eventos))
+	for i, e := range page.Eventos {
+		e2 := e
+		resp[i] = eventoToResponse(&e2)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"eventos":     resp,
+		"total":       page.Total,
+		"nextCursor":  page.NextCursor,
+		"hasNextPage": page.HasNextPage,
+		"limit":       page.Limit,
+	})
+}
+
+// addConvidados handles POST /api/eventos/v1/eventos/{eventoId}/convidados.
+// Header X-Usuario-Id is required and identifies the actor performing the operation.
+func (h *EventHandler) addConvidados(w http.ResponseWriter, r *http.Request) {
+	eventoID := chi.URLParam(r, "eventoId")
+	if eventoID == "" {
+		writeError(w, apierr.BadRequest("eventoId é obrigatório"))
+		return
+	}
+
+	usuarioID := r.Header.Get("X-Usuario-Id")
+	if usuarioID == "" {
+		writeError(w, apierr.BadRequest("header X-Usuario-Id é obrigatório"))
+		return
+	}
+
+	var req addConvidadosRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
+		return
+	}
+	if len(req.Convidados) == 0 {
+		writeError(w, apierr.BadRequest("lista de convidados não pode ser vazia"))
+		return
+	}
+
+	convidados := make([]domain.Convidado, len(req.Convidados))
+	for i, c := range req.Convidados {
+		convidados[i] = domain.Convidado{Telefone: c.Telefone, Nome: c.Nome}
+	}
+
+	in := portin.AddConvidadosInput{
+		EventoID:   eventoID,
+		UsuarioID:  usuarioID,
+		Convidados: convidados,
+	}
+	if err := h.addConvidadosUC.Execute(r.Context(), in); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"message":    "convidados adicionados com sucesso",
+		"eventoId":   eventoID,
+		"quantidade": len(convidados),
+	})
 }
 
 // ---- helpers ----

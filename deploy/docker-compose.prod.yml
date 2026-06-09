@@ -1,0 +1,71 @@
+# Configuração de produção/staging/dev - usa imagens do GitHub Container Registry
+# Deploy via GitHub Actions com self-hosted runner (ver .github/workflows/deploy.yml)
+#
+# ESTRATÉGIA DE INFRAESTRUTURA (Strangler Fig — coexiste com o backend Java):
+# - Porta 8090 (Java usa 8080); acesso interno via BFF/Java, sem proxy NPM
+# - MongoDB/Redis/Temporal: servidores remotos dedicados (mesmos do Java)
+# - Config via env vars com prefixo ROLE_ (viper)
+#
+# NOTA: a imagem é distroless (sem shell/curl), portanto NÃO há bloco
+# healthcheck: aqui. O readiness é validado pelo workflow de deploy via
+# `curl http://localhost:8090/actuator/health` executado no host do LXC
+# (funciona porque network_mode: host).
+
+services:
+  app:
+    image: ghcr.io/role-organizado/backend-go-role-organizado:${IMAGE_TAG:-latest}
+    container_name: backend-go-role-organizado
+    restart: unless-stopped
+    # network_mode: host é NECESSÁRIO para Docker rodando dentro de LXC no Proxmox
+    # Isso evita erros de sysctl (net.ipv4.ip_unprivileged_port_start) durante criação do container
+    network_mode: host
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      # Server
+      ROLE_SERVER_PORT: ${ROLE_SERVER_PORT:-8090}
+      ROLE_SERVER_ENV: ${ROLE_SERVER_ENV}
+      ROLE_SERVER_CORS_ORIGINS: ${ROLE_SERVER_CORS_ORIGINS:-http://localhost:3000,http://localhost:4300}
+      ROLE_SERVER_JAVA_BACKEND_URL: ${ROLE_SERVER_JAVA_BACKEND_URL:-http://localhost:8080}
+
+      # MongoDB (servidor remoto — mesmo replica set do Java)
+      ROLE_MONGO_URI: ${ROLE_MONGO_URI}
+      ROLE_MONGO_DATABASE: ${ROLE_MONGO_DATABASE}
+
+      # JWT (mesmo secret do backend Java — interoperabilidade de tokens)
+      ROLE_JWT_SECRET: ${ROLE_JWT_SECRET}
+
+      # OpenTelemetry
+      ROLE_OTEL_ENDPOINT: ${ROLE_OTEL_ENDPOINT}
+      ROLE_OTEL_ENABLED: ${ROLE_OTEL_ENABLED:-false}
+      ROLE_OTEL_SERVICE_NAME: ${ROLE_OTEL_SERVICE_NAME:-backend-go-role-organizado}
+
+      # Temporal
+      ROLE_TEMPORAL_HOST_PORT: ${ROLE_TEMPORAL_HOST_PORT}
+      ROLE_TEMPORAL_NAMESPACE: ${ROLE_TEMPORAL_NAMESPACE:-default}
+      ROLE_TEMPORAL_WORKER_ENABLED: ${ROLE_TEMPORAL_WORKER_ENABLED:-false}
+
+      # Redis
+      ROLE_REDIS_ADDR: ${ROLE_REDIS_ADDR}
+      ROLE_REDIS_PASSWORD: ${ROLE_REDIS_PASSWORD}
+      ROLE_REDIS_DB: ${ROLE_REDIS_DB:-0}
+
+      # Payment Provider / ASAAS
+      ROLE_ASAAS_USE_MOCK: ${ROLE_ASAAS_USE_MOCK:-true}
+      ROLE_ASAAS_BASE_URL: ${ROLE_ASAAS_BASE_URL:-https://sandbox.asaas.com/api/v3}
+      ROLE_ASAAS_API_KEY: ${ROLE_ASAAS_API_KEY:-}
+      ROLE_ASAAS_WEBHOOK_TOKEN: ${ROLE_ASAAS_WEBHOOK_TOKEN:-}
+
+      # AWS / SQS
+      ROLE_SQS_REGION: ${ROLE_SQS_REGION:-us-east-1}
+      ROLE_SQS_QUEUE_URL: ${ROLE_SQS_QUEUE_URL:-}
+
+    # Não usar 'ports:' com network_mode: host - a aplicação escuta diretamente na porta 8090 do host
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Não usar 'networks:' com network_mode: host

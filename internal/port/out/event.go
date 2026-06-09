@@ -36,6 +36,7 @@ type EventoRepository interface {
 	Save(ctx context.Context, e *event.Evento) (*event.Evento, error)
 	Update(ctx context.Context, e *event.Evento) (*event.Evento, error)
 	DeleteByID(ctx context.Context, id string) error
+	AddConvidados(ctx context.Context, eventoID string, convidados []event.Convidado) error
 }
 
 // EventoDraftRepository defines persistence operations for event drafts.

@@ -18,6 +18,26 @@ import (
 
 // ---- Mock ----
 
+type mockParticipanteRepo struct{ mock.Mock }
+
+func (m *mockParticipanteRepo) SaveOrganizador(ctx context.Context, eventoID, usuarioID string) error {
+	args := m.Called(ctx, eventoID, usuarioID)
+	return args.Error(0)
+}
+
+func (m *mockParticipanteRepo) FindParticipationIDsByUserID(ctx context.Context, userID string) ([]string, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
+}
+
+func (m *mockParticipanteRepo) IsParticipantOfEvent(ctx context.Context, eventID, userID string) (bool, error) {
+	args := m.Called(ctx, eventID, userID)
+	return args.Bool(0), args.Error(1)
+}
+
 type mockEventoRepo struct{ mock.Mock }
 
 func (m *mockEventoRepo) FindByID(ctx context.Context, id string) (*domain.Evento, error) {
@@ -64,6 +84,11 @@ func (m *mockEventoRepo) DeleteByID(ctx context.Context, id string) error {
 	return args.Error(0)
 }
 
+func (m *mockEventoRepo) AddConvidados(ctx context.Context, eventoID string, convidados []domain.Convidado) error {
+	args := m.Called(ctx, eventoID, convidados)
+	return args.Error(0)
+}
+
 // ---- helpers ----
 
 func sampleEvento(id, userID string) *domain.Evento {
@@ -83,7 +108,8 @@ func sampleEvento(id, userID string) *domain.Evento {
 
 func TestCreateEvento_Success(t *testing.T) {
 	repo := new(mockEventoRepo)
-	uc := usecase.NewCreateEvento(repo)
+	parts := new(mockParticipanteRepo)
+	uc := usecase.NewCreateEvento(repo, parts)
 
 	in := portin.CreateEventoInput{
 		UsuarioID: "user-1",
@@ -93,17 +119,56 @@ func TestCreateEvento_Success(t *testing.T) {
 	}
 	saved := &domain.Evento{ID: "evt-1", UsuarioID: "user-1", Nome: "Festa"}
 	repo.On("Save", mock.Anything, mock.AnythingOfType("*event.Evento")).Return(saved, nil)
+	parts.On("SaveOrganizador", mock.Anything, "evt-1", "user-1").Return(nil)
 
 	result, err := uc.Execute(context.Background(), in)
 
 	require.NoError(t, err)
 	assert.Equal(t, "evt-1", result.ID)
 	repo.AssertExpectations(t)
+	parts.AssertExpectations(t)
+}
+
+func TestCreateEvento_CreatesOrganizadorParticipant(t *testing.T) {
+	repo := new(mockEventoRepo)
+	parts := new(mockParticipanteRepo)
+	uc := usecase.NewCreateEvento(repo, parts)
+
+	// Simulate ObjectID-format user ID (as produced by Go's user registration)
+	userID := "507f1f77bcf86cd799439011"
+	saved := &domain.Evento{ID: "evt-uuid-1", UsuarioID: userID, Nome: "Festa"}
+	repo.On("Save", mock.Anything, mock.AnythingOfType("*event.Evento")).Return(saved, nil)
+	parts.On("SaveOrganizador", mock.Anything, "evt-uuid-1", userID).Return(nil)
+
+	in := portin.CreateEventoInput{UsuarioID: userID, Nome: "Festa"}
+	result, err := uc.Execute(context.Background(), in)
+
+	require.NoError(t, err)
+	assert.Equal(t, "evt-uuid-1", result.ID)
+	// Verify that participant creation was called with correct IDs
+	parts.AssertCalled(t, "SaveOrganizador", mock.Anything, "evt-uuid-1", userID)
+}
+
+func TestCreateEvento_ParticipantFailureIsNonFatal(t *testing.T) {
+	repo := new(mockEventoRepo)
+	parts := new(mockParticipanteRepo)
+	uc := usecase.NewCreateEvento(repo, parts)
+
+	saved := &domain.Evento{ID: "evt-1", UsuarioID: "u1", Nome: "Festa"}
+	repo.On("Save", mock.Anything, mock.AnythingOfType("*event.Evento")).Return(saved, nil)
+	// Participant save fails — event creation should still succeed
+	parts.On("SaveOrganizador", mock.Anything, "evt-1", "u1").Return(apierr.Internal("participant db error"))
+
+	result, err := uc.Execute(context.Background(), portin.CreateEventoInput{UsuarioID: "u1", Nome: "Festa"})
+
+	require.NoError(t, err, "participant failure must not fail event creation")
+	assert.Equal(t, "evt-1", result.ID)
 }
 
 func TestCreateEvento_RepoError(t *testing.T) {
 	repo := new(mockEventoRepo)
-	uc := usecase.NewCreateEvento(repo)
+	parts := new(mockParticipanteRepo)
+	uc := usecase.NewCreateEvento(repo, parts)
 
 	repo.On("Save", mock.Anything, mock.AnythingOfType("*event.Evento")).
 		Return(nil, apierr.Internal("db error"))

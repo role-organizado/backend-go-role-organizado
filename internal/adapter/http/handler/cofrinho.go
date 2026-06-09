@@ -15,9 +15,10 @@ import (
 
 // CofrinhoHandler handles cofrinho contribution HTTP endpoints.
 type CofrinhoHandler struct {
-	createUC   portin.CreateContribuicaoUseCase
-	listUC     portin.ListContribuicoesUseCase
+	createUC    portin.CreateContribuicaoUseCase
+	listUC      portin.ListContribuicoesUseCase
 	confirmarUC portin.ConfirmarContribuicaoUseCase
+	removerUC   portin.RemoverContribuicaoUseCase
 }
 
 // NewCofrinhoHandler creates a new CofrinhoHandler.
@@ -25,11 +26,13 @@ func NewCofrinhoHandler(
 	create portin.CreateContribuicaoUseCase,
 	list portin.ListContribuicoesUseCase,
 	confirmar portin.ConfirmarContribuicaoUseCase,
+	remover portin.RemoverContribuicaoUseCase,
 ) *CofrinhoHandler {
 	return &CofrinhoHandler{
 		createUC:    create,
 		listUC:      list,
 		confirmarUC: confirmar,
+		removerUC:   remover,
 	}
 }
 
@@ -37,10 +40,12 @@ func NewCofrinhoHandler(
 func (h *CofrinhoHandler) RegisterCofrinhoRoutes(r chi.Router) {
 	// Guest can submit a contribution (auth optional)
 	r.Post("/api/v1/eventos/{eventoId}/cofrinho", h.createContribuicao)
-	// Event owner lists contributions
+	// Event owner lists contributions + saldo
 	r.Get("/api/v1/eventos/{eventoId}/cofrinho", h.listContribuicoes)
 	// Payment webhook confirms a contribution
 	r.Post("/api/v1/cofrinho/{id}/confirmar", h.confirmarContribuicao)
+	// Event owner removes a PENDENTE contribution
+	r.Delete("/api/v1/baby-shower/cofrinho/{id}", h.removerContribuicao)
 }
 
 // ---- Request / Response DTOs ----
@@ -57,17 +62,32 @@ type confirmarContribuicaoRequest struct {
 }
 
 type cofrinhoContribuicaoResponse struct {
-	ID               string `json:"id"`
-	EventoID         string `json:"eventoId"`
-	GuestID          string `json:"guestId"`
-	Nome             string `json:"nome"`
-	Mensagem         string `json:"mensagem"`
-	Valor            int64  `json:"valor"`
-	Status           string `json:"status"`
-	PIXQRCode        string `json:"pixQrCode,omitempty"`
-	WebhookPaymentID string `json:"webhookPaymentId,omitempty"`
+	ID               string    `json:"id"`
+	EventoID         string    `json:"eventoId"`
+	GuestID          string    `json:"guestId"`
+	Nome             string    `json:"nome"`
+	Mensagem         string    `json:"mensagem"`
+	Valor            int64     `json:"valor"`
+	Status           string    `json:"status"`
+	PIXQRCode        string    `json:"pixQrCode,omitempty"`
+	WebhookPaymentID string    `json:"webhookPaymentId,omitempty"`
 	CriadoEm        time.Time `json:"criadoEm"`
 	UpdatedAt        time.Time `json:"updatedAt"`
+}
+
+// saldoCofrinhoResponse mirrors Java's SaldoCofrinhoResponse record.
+// Only CONFIRMADO contributions are counted in totals.
+type saldoCofrinhoResponse struct {
+	EventoID                string `json:"eventoId"`
+	TotalConfirmadoCents    int64  `json:"totalConfirmadoCents"`
+	QuantidadeContribuicoes int64  `json:"quantidadeContribuicoes"`
+}
+
+// cofrinhoSummaryResponse mirrors Java's CofrinhoSummaryResponse record.
+// GET /api/v1/eventos/{eventoId}/cofrinho returns this combined view.
+type cofrinhoSummaryResponse struct {
+	Saldo         saldoCofrinhoResponse          `json:"saldo"`
+	Contribuicoes []cofrinhoContribuicaoResponse `json:"contribuicoes"`
 }
 
 func toContribuicaoResponse(c *domain.CofrinhoContribuicao) cofrinhoContribuicaoResponse {
@@ -122,6 +142,8 @@ func (h *CofrinhoHandler) createContribuicao(w http.ResponseWriter, r *http.Requ
 }
 
 // listContribuicoes handles GET /api/v1/eventos/{eventoId}/cofrinho
+// Returns a summary matching Java's CofrinhoSummaryResponse: saldo + full list.
+// Only CONFIRMADO contributions are counted toward saldo.totalConfirmadoCents.
 func (h *CofrinhoHandler) listContribuicoes(w http.ResponseWriter, r *http.Request) {
 	eventoID := chi.URLParam(r, "eventoId")
 
@@ -131,11 +153,28 @@ func (h *CofrinhoHandler) listContribuicoes(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	resp := make([]cofrinhoContribuicaoResponse, len(contribuicoes))
-	for i, c := range contribuicoes {
-		resp[i] = toContribuicaoResponse(c)
+	// Compute saldo inline — mirrors BuscarSaldoCofrinhoUseCaseImpl behaviour.
+	var totalConfirmadoCents, qtdConfirmadas int64
+	for _, c := range contribuicoes {
+		if c.Status == domain.StatusConfirmado {
+			totalConfirmadoCents += c.Valor
+			qtdConfirmadas++
+		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+
+	items := make([]cofrinhoContribuicaoResponse, len(contribuicoes))
+	for i, c := range contribuicoes {
+		items[i] = toContribuicaoResponse(c)
+	}
+
+	writeJSON(w, http.StatusOK, cofrinhoSummaryResponse{
+		Saldo: saldoCofrinhoResponse{
+			EventoID:                eventoID,
+			TotalConfirmadoCents:    totalConfirmadoCents,
+			QuantidadeContribuicoes: qtdConfirmadas,
+		},
+		Contribuicoes: items,
+	})
 }
 
 // confirmarContribuicao handles POST /api/v1/cofrinho/{id}/confirmar
@@ -159,4 +198,16 @@ func (h *CofrinhoHandler) confirmarContribuicao(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, toContribuicaoResponse(c))
+}
+
+// removerContribuicao handles DELETE /api/v1/baby-shower/cofrinho/{id}
+// Only contributions with status PENDENTE can be removed.
+// CONFIRMADO contributions require a refund flow via the payment provider.
+func (h *CofrinhoHandler) removerContribuicao(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.removerUC.Execute(r.Context(), id); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

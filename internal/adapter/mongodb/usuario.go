@@ -2,11 +2,9 @@ package mongodb
 
 import (
 	"context"
-	"encoding/hex"
-	"fmt"
-	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -61,53 +59,6 @@ type usuarioDocument struct {
 	Ativo          bool               `bson:"ativo"`
 	CriadoEm      time.Time          `bson:"criado_em"`
 	UpdatedAt      time.Time          `bson:"updated_at"`
-}
-
-// rawIDToString converts any MongoDB _id value to a string representation.
-// Handles ObjectID (hex string), UUID Binary (UUID string format), and plain strings.
-func rawIDToString(id interface{}) string {
-	if id == nil {
-		return ""
-	}
-	switch v := id.(type) {
-	case bson.ObjectID:
-		return v.Hex()
-	case string:
-		return v
-	case bson.Binary:
-		// UUID stored as BSON Binary (subtype 3 = old UUID, subtype 4 = UUID RFC 4122)
-		if (v.Subtype == 3 || v.Subtype == 4) && len(v.Data) == 16 {
-			b := v.Data
-			return fmt.Sprintf("%s-%s-%s-%s-%s",
-				hex.EncodeToString(b[0:4]),
-				hex.EncodeToString(b[4:6]),
-				hex.EncodeToString(b[6:8]),
-				hex.EncodeToString(b[8:10]),
-				hex.EncodeToString(b[10:16]))
-		}
-		return hex.EncodeToString(v.Data)
-	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
-
-// parseIDToFilter builds a MongoDB _id filter from a string ID.
-// Handles ObjectID hex strings, UUID strings (8-4-4-4-12 format), and plain strings.
-func parseIDToFilter(id string) bson.D {
-	// Try as ObjectID hex (exactly 24 hex chars)
-	if oid, err := bson.ObjectIDFromHex(id); err == nil {
-		return bson.D{{Key: "_id", Value: oid}}
-	}
-	// Try as UUID string (8-4-4-4-12 hex format → Binary subtype 4)
-	parts := strings.Split(id, "-")
-	if len(parts) == 5 {
-		hexStr := strings.Join(parts, "")
-		if b, err := hex.DecodeString(hexStr); err == nil && len(b) == 16 {
-			return bson.D{{Key: "_id", Value: bson.Binary{Subtype: 0x04, Data: b}}}
-		}
-	}
-	// Fallback: string _id
-	return bson.D{{Key: "_id", Value: id}}
 }
 
 // UsuarioRepository implements portout.UsuarioRepository using MongoDB.
@@ -168,11 +119,15 @@ func (r *UsuarioRepository) FindByProviderID(ctx context.Context, provider, prov
 	return &u, nil
 }
 
-// Save inserts a new Usuario document with a freshly generated ObjectID.
+// Save inserts a new Usuario document with a freshly generated UUID binary ID,
+// matching Java's schema so that cross-collection validators (e.g. refresh_tokens.usuario_id)
+// accept the value without type errors.
 func (r *UsuarioRepository) Save(ctx context.Context, u *auth.Usuario) (*auth.Usuario, error) {
 	now := time.Now().UTC()
 	doc := usuarioToDoc(u)
-	doc.ID = bson.NewObjectID()
+	newUUID := uuid.New()
+	idBytes := [16]byte(newUUID)
+	doc.ID = bson.Binary{Subtype: 0x04, Data: idBytes[:]}
 	doc.CriadoEm = now
 	doc.UpdatedAt = now
 

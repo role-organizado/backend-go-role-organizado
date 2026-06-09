@@ -140,6 +140,17 @@ func UserIDFromContext(ctx context.Context) string {
 	return v
 }
 
+// WithUserIDContext injects userID into ctx as if the user were authenticated.
+// Primarily used in tests to simulate authenticated requests without a full JWT stack.
+func WithUserIDContext(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, contextKeyUserID, userID)
+}
+
+// ContextWithUserID is an alias for WithUserIDContext.
+func ContextWithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, contextKeyUserID, userID)
+}
+
 // ClaimsFromContext extracts the JWT claims from the request context.
 // Returns nil if not authenticated.
 func ClaimsFromContext(ctx context.Context) *pkgjwt.Claims {

@@ -15,35 +15,33 @@ import (
 // refreshTokenDocument is the MongoDB BSON document for RefreshToken.
 // Schema matches Java's Spring Data MongoDB storage:
 //   - _id: binData (UUID binary subtype 4)
-//   - usuario_id: binData (UUID binary subtype 4)
+//   - usuario_id: ObjectID (Go-created users) or binData UUID (Java-created users)
 //   - criado_em: date (NOT created_at)
 //   - usado_em: date|null (marks when used, null when active)
 type refreshTokenDocument struct {
 	ID        bson.Binary `bson:"_id"`
-	UsuarioID bson.Binary `bson:"usuario_id"`
+	UsuarioID interface{} `bson:"usuario_id"`
 	Token     string      `bson:"token"`
 	ExpiresAt time.Time   `bson:"expires_at"`
 	CriadoEm  time.Time   `bson:"criado_em"`
 	UsadoEm   *time.Time  `bson:"usado_em,omitempty"`
 }
 
-// uuidStringToBinary parses a UUID string (8-4-4-4-12) into a bson.Binary subtype 4.
-// Falls back to random UUID if parsing fails.
-func uuidStringToBinary(s string) bson.Binary {
-	u, err := uuid.Parse(s)
-	if err != nil {
-		u = uuid.New()
+// parseUserIDToBSON converts a user ID string to the correct BSON value for storage.
+// Go-created users have ObjectID hex strings (24 chars); Java-created users have UUID strings.
+// Storing the correct type ensures FindByID can locate the user after a refresh.
+func parseUserIDToBSON(id string) interface{} {
+	// Try ObjectID hex (exactly 24 hex chars) — Go-created users
+	if oid, err := bson.ObjectIDFromHex(id); err == nil {
+		return oid
 	}
-	b := [16]byte(u)
-	return bson.Binary{Subtype: 0x04, Data: b[:]}
-}
-
-// uuidBinaryToString converts a bson.Binary (subtype 3 or 4) to a UUID string.
-func uuidBinaryToString(b bson.Binary) string {
-	if len(b.Data) != 16 {
-		return ""
+	// Try UUID string (8-4-4-4-12 format) — Java-created users
+	if u, err := uuid.Parse(id); err == nil {
+		b := [16]byte(u)
+		return bson.Binary{Subtype: 0x04, Data: b[:]}
 	}
-	return uuid.UUID(b.Data).String()
+	// Fallback: plain string
+	return id
 }
 
 // RefreshTokenRepository implements portout.RefreshTokenRepository using MongoDB.
@@ -56,13 +54,14 @@ func NewRefreshTokenRepository(client *Client) *RefreshTokenRepository {
 	return &RefreshTokenRepository{col: client.Collection("refresh_tokens")}
 }
 
-// Save inserts a new refresh token document using UUID binary IDs (Java-compatible schema).
+// Save inserts a new refresh token document. The usuario_id is stored as the correct
+// BSON type: ObjectID for Go-created users, UUID Binary for Java-created users.
 func (r *RefreshTokenRepository) Save(ctx context.Context, rt *auth.RefreshToken) (*auth.RefreshToken, error) {
 	newID := uuid.New()
 	idBytes := [16]byte(newID)
 	doc := refreshTokenDocument{
 		ID:        bson.Binary{Subtype: 0x04, Data: idBytes[:]},
-		UsuarioID: uuidStringToBinary(rt.UsuarioID),
+		UsuarioID: parseUserIDToBSON(rt.UsuarioID),
 		Token:     rt.Token,
 		ExpiresAt: rt.ExpiresAt,
 		CriadoEm:  time.Now().UTC(),
@@ -106,20 +105,18 @@ func (r *RefreshTokenRepository) Revoke(ctx context.Context, token string) error
 func (r *RefreshTokenRepository) RevokeAllForUser(ctx context.Context, usuarioID string) error {
 	now := time.Now().UTC()
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: "usado_em", Value: now}}}}
-	_, err := r.col.UpdateMany(ctx, bson.D{{Key: "usuario_id", Value: uuidStringToBinary(usuarioID)}}, update)
+	_, err := r.col.UpdateMany(ctx, bson.D{{Key: "usuario_id", Value: parseUserIDToBSON(usuarioID)}}, update)
 	return err
 }
 
 func refreshTokenFromDoc(doc refreshTokenDocument) auth.RefreshToken {
 	used := doc.UsadoEm != nil
-	var createdAt time.Time
-	createdAt = doc.CriadoEm
 	return auth.RefreshToken{
 		ID:        uuidBinaryToString(doc.ID),
-		UsuarioID: uuidBinaryToString(doc.UsuarioID),
+		UsuarioID: rawIDToString(doc.UsuarioID),
 		Token:     doc.Token,
 		ExpiresAt: doc.ExpiresAt,
 		Used:      used,
-		CreatedAt: createdAt,
+		CreatedAt: doc.CriadoEm,
 	}
 }

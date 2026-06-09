@@ -18,6 +18,12 @@ import (
 
 const colEventos = "eventos"
 
+// convidadoDoc is the MongoDB BSON representation of a Convidado (guest).
+type convidadoDoc struct {
+	Telefone string `bson:"telefone"`
+	Nome     string `bson:"nome,omitempty"`
+}
+
 // eventoDocument matches Java's MongoDB schema for the 'eventos' collection.
 // _id can be ObjectID (Go-created) or UUID binary (Java-created) — use interface{}.
 type eventoDocument struct {
@@ -36,6 +42,7 @@ type eventoDocument struct {
 	RateiosHabilitado    bool        `bson:"rateios_habilitado,omitempty"`
 	PagamentosHabilitado bool        `bson:"pagamentos_habilitado,omitempty"`
 	ImageURL             string      `bson:"image_url,omitempty"`
+	Convidados           []convidadoDoc `bson:"convidados,omitempty"`
 	ModulosAtivos        []string       `bson:"modulos_ativos,omitempty"`
 	ConfiguracaoNicho    map[string]any `bson:"configuracao_nicho,omitempty"`
 	CriadoEm            time.Time   `bson:"criado_em,omitempty"`
@@ -68,7 +75,7 @@ func (r *EventoRepository) FindByID(ctx context.Context, id string) (*domain.Eve
 
 // FindByUsuarioID paginates events belonging to the given user.
 func (r *EventoRepository) FindByUsuarioID(ctx context.Context, usuarioID string, page, pageSize int) ([]domain.Evento, int64, error) {
-	filter := bson.D{{Key: "usuario_id_responsavel", Value: uuidStringToBinary(usuarioID)}}
+	filter := bson.D{{Key: "usuario_id_responsavel", Value: userIDValue(usuarioID)}}
 	return r.findPaginated(ctx, filter, page, pageSize)
 }
 
@@ -91,7 +98,7 @@ func (r *EventoRepository) FindByUsuarioIDCursor(ctx context.Context, usuarioID 
 	}
 
 	// Build filter
-	filter := bson.D{{Key: "usuario_id_responsavel", Value: uuidStringToBinary(usuarioID)}}
+	filter := bson.D{{Key: "usuario_id_responsavel", Value: userIDValue(usuarioID)}}
 	if filtros.Status != nil {
 		filter = append(filter, bson.E{Key: "status", Value: *filtros.Status})
 	}
@@ -189,7 +196,7 @@ func (r *EventoRepository) findPaginated(ctx context.Context, filter bson.D, pag
 // Save inserts a new event. Uses UUID binary for _id (matches Java schema); stores usuario_id_responsavel as UUID binary.
 func (r *EventoRepository) Save(ctx context.Context, e *domain.Evento) (*domain.Evento, error) {
 	// Use UUID binary for _id so that the ID can be used as binData in rateio.evento_id
-	newID := uuidStringToBinary(uuid.New().String())
+	newID := UUIDStringToBinary(uuid.New().String())
 	now := time.Now().UTC()
 	status := string(e.Status)
 	if status == "" {
@@ -200,7 +207,7 @@ func (r *EventoRepository) Save(ctx context.Context, e *domain.Evento) (*domain.
 		Nome:                 e.Nome,
 		Tipo:                 e.Tipo,
 		DataInicio:           e.Data,
-		UsuarioIDResponsavel: uuidStringToBinary(e.UsuarioID),
+		UsuarioIDResponsavel: userIDValue(e.UsuarioID),
 		Descricao:            e.Descricao,
 		Local:                e.Local,
 		Status:               status,
@@ -260,6 +267,28 @@ func (r *EventoRepository) DeleteByID(ctx context.Context, id string) error {
 	}
 	if res.DeletedCount == 0 {
 		return apierr.NotFound("evento", id)
+	}
+	return nil
+}
+
+// AddConvidados appends the given convidados to an event's guest list using $push/$each.
+func (r *EventoRepository) AddConvidados(ctx context.Context, eventoID string, convidados []domain.Convidado) error {
+	filter := parseIDToFilter(eventoID)
+	docs := make([]convidadoDoc, len(convidados))
+	for i, c := range convidados {
+		docs[i] = convidadoDoc{Telefone: c.Telefone, Nome: c.Nome}
+	}
+	update := bson.D{{Key: "$push", Value: bson.D{
+		{Key: "convidados", Value: bson.D{
+			{Key: "$each", Value: docs},
+		}},
+	}}}
+	res, err := r.col.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return apierr.Internal(err.Error())
+	}
+	if res.MatchedCount == 0 {
+		return apierr.NotFound("evento", eventoID)
 	}
 	return nil
 }

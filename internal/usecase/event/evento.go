@@ -15,15 +15,19 @@ import (
 
 // CreateEvento implements portin.CreateEventoUseCase.
 type CreateEvento struct {
-	eventos portout.EventoRepository
+	eventos      portout.EventoRepository
+	participantes portout.ParticipanteRepository
 }
 
 // NewCreateEvento creates a new CreateEvento use case.
-func NewCreateEvento(e portout.EventoRepository) *CreateEvento {
-	return &CreateEvento{eventos: e}
+// participantes is used to auto-register the creator as ORGANIZADOR after the event is saved,
+// matching Java's behaviour and fixing downstream 403 errors on ownership checks.
+func NewCreateEvento(e portout.EventoRepository, p portout.ParticipanteRepository) *CreateEvento {
+	return &CreateEvento{eventos: e, participantes: p}
 }
 
-// Execute creates a new event owned by the given user.
+// Execute creates a new event owned by the given user and registers the creator
+// as an ORGANIZADOR participant in the participants collection.
 func (uc *CreateEvento) Execute(ctx context.Context, in portin.CreateEventoInput) (*domain.Evento, error) {
 	ctx, span := tracing.StartSpan(ctx, "usecase.event.create", tracing.UserID(in.UsuarioID))
 	defer span.End()
@@ -50,7 +54,18 @@ func (uc *CreateEvento) Execute(ctx context.Context, in portin.CreateEventoInput
 		CriadoEm:             now,
 		UpdatedAt:            now,
 	}
-	return uc.eventos.Save(ctx, e)
+	saved, err := uc.eventos.Save(ctx, e)
+	if err != nil {
+		return nil, err
+	}
+
+	// Auto-register creator as ORGANIZADOR in the participants collection.
+	// Failure here is non-fatal — log via span but don't roll back the event.
+	if regErr := uc.participantes.SaveOrganizador(ctx, saved.ID, in.UsuarioID); regErr != nil {
+		tracing.RecordError(span, regErr)
+	}
+
+	return saved, nil
 }
 
 // ---- GetEvento ----
@@ -189,6 +204,32 @@ func (uc *DeleteEvento) Execute(ctx context.Context, id, requesterID string) err
 		return apierr.Forbidden("acesso negado")
 	}
 	return uc.eventos.DeleteByID(ctx, id)
+}
+
+// ---- AddConvidados ----
+
+// AddConvidados implements portin.AddConvidadosUseCase.
+type AddConvidados struct {
+	eventos portout.EventoRepository
+}
+
+// NewAddConvidados creates a new AddConvidados use case.
+func NewAddConvidados(e portout.EventoRepository) *AddConvidados {
+	return &AddConvidados{eventos: e}
+}
+
+// Execute adds convidados to a published event, verifying the event exists.
+func (uc *AddConvidados) Execute(ctx context.Context, in portin.AddConvidadosInput) error {
+	ctx, span := tracing.StartSpan(ctx, "usecase.event.addConvidados",
+		tracing.EventID(in.EventoID),
+		tracing.UserID(in.UsuarioID),
+	)
+	defer span.End()
+
+	if len(in.Convidados) == 0 {
+		return nil
+	}
+	return uc.eventos.AddConvidados(ctx, in.EventoID, in.Convidados)
 }
 
 // ---- ListEventosByUsuario ----

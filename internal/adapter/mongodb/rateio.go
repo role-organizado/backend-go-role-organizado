@@ -18,16 +18,16 @@ import (
 // Enum: tipo_cobranca (PERCENTUAL/DIVISAO/ITENS/FIXO), status (ATIVO/CANCELADO)
 
 type rateioDocument struct {
-	ID                   interface{}  `bson:"_id,omitempty"`
-	EventoID             bson.Binary  `bson:"evento_id"`                      // MUST be binData per schema
-	UsuarioIDResponsavel *bson.Binary `bson:"usuario_id_responsavel,omitempty"` // binData per schema
-	Nome                 string       `bson:"nome,omitempty"`
-	TipoCobranca         string       `bson:"tipo_cobranca"`                  // enum: PERCENTUAL/DIVISAO/ITENS/FIXO
-	ValorRateado         int64        `bson:"valor_rateado"`                  // long in Java
-	Status               string       `bson:"status"`                         // enum: ATIVO/CANCELADO
-	PendenteRecalculo    bool         `bson:"pendente_recalculo"`
-	CriadoEm            time.Time    `bson:"criado_em"`
-	AtualizadoEm        time.Time    `bson:"atualizado_em,omitempty"`         // Java: atualizado_em
+	ID                   interface{} `bson:"_id,omitempty"`
+	EventoID             bson.Binary `bson:"evento_id"`                        // MUST be binData per schema
+	UsuarioIDResponsavel interface{} `bson:"usuario_id_responsavel,omitempty"` // ObjectID or binData depending on user origin
+	Nome                 string      `bson:"nome,omitempty"`
+	TipoCobranca         string      `bson:"tipo_cobranca"`                   // enum: PERCENTUAL/DIVISAO/ITENS/FIXO
+	ValorRateado         int64       `bson:"valor_rateado"`                   // long in Java
+	Status               string      `bson:"status"`                          // enum: ATIVO/CANCELADO
+	PendenteRecalculo    bool        `bson:"pendente_recalculo"`
+	CriadoEm            time.Time   `bson:"criado_em"`
+	AtualizadoEm        time.Time   `bson:"atualizado_em,omitempty"`          // Java: atualizado_em
 }
 
 // statusToMongo maps Go domain status to MongoDB enum.
@@ -52,7 +52,7 @@ func statusFromMongo(s string) domain.StatusRateio {
 
 func rateioDocFromDomain(r *domain.Rateio) rateioDocument {
 	eventoIDHex := r.EventoID
-	eventoIDBin := uuidStringToBinary(eventoIDHex)
+	eventoIDBin := UUIDStringToBinary(eventoIDHex)
 
 	doc := rateioDocument{
 		EventoID:          eventoIDBin,
@@ -65,8 +65,7 @@ func rateioDocFromDomain(r *domain.Rateio) rateioDocument {
 		AtualizadoEm:     r.UpdatedAt,
 	}
 	if r.UsuarioID != "" {
-		bin := uuidStringToBinary(r.UsuarioID)
-		doc.UsuarioIDResponsavel = &bin
+		doc.UsuarioIDResponsavel = userIDValue(r.UsuarioID)
 	}
 	return doc
 }
@@ -75,7 +74,7 @@ func ratiodocToDomain(doc rateioDocument) *domain.Rateio {
 	id := rawIDToString(doc.ID)
 	var usuarioID string
 	if doc.UsuarioIDResponsavel != nil {
-		usuarioID = uuidBinaryToString(*doc.UsuarioIDResponsavel)
+		usuarioID = rawIDToString(doc.UsuarioIDResponsavel)
 	}
 	return &domain.Rateio{
 		ID:        id,
@@ -113,7 +112,10 @@ func (r *RateioMongoRepository) FindByID(ctx context.Context, id string) (*domai
 }
 
 func (r *RateioMongoRepository) FindByEventoID(ctx context.Context, eventoID string) ([]domain.Rateio, error) {
-	filter := bson.D{{Key: "evento_id", Value: uuidStringToBinary(eventoID)}}
+	// eventoID must be a valid UUID string — it is stored as bson.Binary subtype 4
+	// in the Java-compatible schema. UUIDStringToBinary produces the same binary
+	// on every call for a given valid UUID, ensuring the filter matches the stored value.
+	filter := bson.D{{Key: "evento_id", Value: UUIDStringToBinary(eventoID)}}
 	cur, err := r.col.Find(ctx, filter)
 	if err != nil {
 		return nil, apierr.Internal(err.Error())
@@ -127,12 +129,14 @@ func (r *RateioMongoRepository) FindByEventoID(ctx context.Context, eventoID str
 		}
 		result = append(result, *ratiodocToDomain(doc))
 	}
+	if err := cur.Err(); err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
 	return result, nil
 }
 
 func (r *RateioMongoRepository) FindByUsuarioID(ctx context.Context, usuarioID string, page, pageSize int) ([]domain.Rateio, int64, error) {
-	bin := uuidStringToBinary(usuarioID)
-	filter := bson.D{{Key: "usuario_id_responsavel", Value: bin}}
+	filter := bson.D{{Key: "usuario_id_responsavel", Value: userIDValue(usuarioID)}}
 	total, err := r.col.CountDocuments(ctx, filter)
 	if err != nil {
 		return nil, 0, apierr.Internal(err.Error())

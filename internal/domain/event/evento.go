@@ -39,6 +39,12 @@ const (
 	EventoStatusConcluido  EventoStatus = "CONCLUIDO"
 )
 
+// Convidado represents a guest added to a published event.
+type Convidado struct {
+	Telefone string
+	Nome     string
+}
+
 // IsOwner returns true if the given userID owns this event.
 func (e *Evento) IsOwner(userID string) bool {
 	return e.UsuarioID == userID
