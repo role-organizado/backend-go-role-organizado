@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -127,7 +128,7 @@ func Init(ctx context.Context, cfg Config) (*Providers, error) {
 	}
 	global.SetLoggerProvider(lp)
 
-	mp, err := newMeterProvider(ctx, res)
+	mp, err := newMeterProvider(ctx, cfg.OTLPEndpoint, res)
 	if err != nil {
 		return nil, fmt.Errorf("creating meter provider: %w", err)
 	}
@@ -191,8 +192,17 @@ func newLoggerProvider(ctx context.Context, endpoint string, res *resource.Resou
 	), nil
 }
 
-func newMeterProvider(_ context.Context, res *resource.Resource) (*sdkmetric.MeterProvider, error) {
+func newMeterProvider(ctx context.Context, endpoint string, res *resource.Resource) (*sdkmetric.MeterProvider, error) {
+	exporter, err := otlpmetrichttp.New(ctx,
+		otlpmetrichttp.WithEndpoint(endpoint),
+		otlpmetrichttp.WithInsecure(),
+		otlpmetrichttp.WithTimeout(10*time.Second),
+	)
+	if err != nil {
+		return nil, err
+	}
 	return sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
 	), nil
 }

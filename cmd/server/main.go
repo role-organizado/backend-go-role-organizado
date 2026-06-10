@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/handler"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
@@ -85,7 +86,10 @@ func main() {
 	}
 	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
 
-	var logHandler slog.Handler = jsonHandler
+	// Sempre wrappear com TraceContextHandler para injetar trace_id/span_id no JSON stdout.
+	// Quando OTel está habilitado, o TeeHandler encaminha também para o LoggerProvider.
+	tracedJSON := pkgotel.NewTraceContextHandler(jsonHandler)
+	var logHandler slog.Handler = tracedJSON
 
 	ctx := context.Background()
 
@@ -107,7 +111,7 @@ func main() {
 				slog.Error("otel shutdown", "error", err)
 			}
 		}()
-		logHandler = pkgotel.NewTeeHandler(providers.LoggerProvider, jsonHandler)
+		logHandler = pkgotel.NewTeeHandler(providers.LoggerProvider, tracedJSON)
 	}
 
 	logger := slog.New(logHandler)
@@ -563,6 +567,10 @@ func main() {
 	r := chi.NewRouter()
 
 	// --- Global middleware (applied to every request) ---
+	// OTel deve ser o primeiro para criar o span raiz antes que os demais middlewares executem.
+	if cfg.OTel.Enabled {
+		r.Use(otelhttp.NewMiddleware(cfg.OTel.ServiceName))
+	}
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(middleware.ErrorHandler)
