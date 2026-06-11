@@ -59,6 +59,8 @@ import (
 	ucsocial "github.com/role-organizado/backend-go-role-organizado/internal/usecase/social"
 	// Pricing — PSP cost review
 	ucpricing "github.com/role-organizado/backend-go-role-organizado/internal/usecase/pricing"
+	// Guest + Biometric Auth (Java parity: GuestController + BiometricAuthController)
+	ucguest "github.com/role-organizado/backend-go-role-organizado/internal/usecase/guest"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -148,6 +150,10 @@ func main() {
 	}
 	if err := migrations.RunV085CreateSocialFeaturesIndexes(ctx, mongoClient.DB()); err != nil {
 		slog.Error("migration v085 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV088CreateGuestsBiometricIndexes(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v088 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -440,6 +446,40 @@ func main() {
 		removeAlbumLinkUC,
 	)
 
+	// === GUESTS DOMAIN ===
+	// Java parity: GuestController + CriarOuBuscarGuestUseCase (collection: guests).
+	// All endpoints are PUBLIC — registered outside the JWT-protected group below.
+	guestRepo := mongodb.NewGuestRepository(mongoClient)
+	createOrFindGuestUC := ucguest.NewCreateOrFindGuest(guestRepo)
+	getGuestUC := ucguest.NewGetGuest(guestRepo)
+	getGuestByTelefoneUC := ucguest.NewGetGuestByTelefone(guestRepo)
+	getGuestByEmailUC := ucguest.NewGetGuestByEmail(guestRepo)
+	listGuestsUC := ucguest.NewListGuests(guestRepo)
+	batchGetGuestsUC := ucguest.NewBatchGetGuests(guestRepo)
+	guestHandler := handler.NewGuestHandler(
+		createOrFindGuestUC, getGuestUC, getGuestByTelefoneUC, getGuestByEmailUC,
+		listGuestsUC, batchGetGuestsUC,
+	)
+
+	// === BIOMETRIC AUTH DOMAIN ===
+	// Java parity: BiometricAuthController + BiometricAuthUseCase.
+	// Collections: biometric_credentials, biometric_challenges (TTL on expires_at).
+	// Challenge / authenticate / status are PUBLIC; register / devices / revoke require JWT.
+	biometricCredRepo := mongodb.NewBiometricCredentialRepository(mongoClient)
+	biometricChallengeRepo := mongodb.NewBiometricChallengeRepository(mongoClient)
+	generateChallengeUC := ucguest.NewGenerateBiometricChallenge(biometricCredRepo, biometricChallengeRepo)
+	biometricAuthUC := ucguest.NewBiometricAuthenticate(
+		biometricCredRepo, biometricChallengeRepo, usuarioRepo, refreshTokenRepo, jwtSvc,
+	)
+	registerCredentialUC := ucguest.NewRegisterBiometricCredential(biometricCredRepo, usuarioRepo)
+	listDevicesUC := ucguest.NewListBiometricDevices(biometricCredRepo)
+	revokeDeviceUC := ucguest.NewRevokeBiometricDevice(biometricCredRepo, biometricChallengeRepo)
+	checkBiometricStatusUC := ucguest.NewCheckBiometricStatus(biometricCredRepo)
+	biometricHandler := handler.NewBiometricHandler(
+		generateChallengeUC, biometricAuthUC, registerCredentialUC,
+		listDevicesUC, revokeDeviceUC, checkBiometricStatusUC,
+	)
+
 	// --- Phase 8: Temporal Worker (payment workflows) ---
 	// Enabled via TEMPORAL_WORKER_ENABLED=true (default: false during Strangler Fig migration).
 	// When disabled, no-op starters/signalers are used so the payment use cases compile and
@@ -643,6 +683,8 @@ func main() {
 	paymentWebhookHandler.RegisterWebhookRoutes(r) // POST /api/v1/webhooks/payment/asaas (no JWT)
 	whatsappWebhookHandler.RegisterWebhookRoutes(r) // POST + GET /api/v1/webhooks/notifications/whatsapp (no JWT)
 	eventoHandler.RegisterPublicEventRoutes(r) // CSE_014 — GET /api/v1/eventos/{eventId}/public-info (no JWT)
+	guestHandler.RegisterGuestRoutes(r)              // Java parity: GuestController is fully public
+	biometricHandler.RegisterPublicRoutes(r)          // challenge / authenticate / status (public)
 
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {
@@ -668,6 +710,11 @@ func main() {
 		approvalsHandler.RegisterApprovalsRoutes(r)
 		outboundRequestHandler.RegisterOutboundRequestRoutes(r)
 	})
+
+	// --- Biometric protected routes (own JWT middleware — sits under /api/auth/* which
+	// the global JWTAuth treats as public). Must be registered AFTER the public auth
+	// handler to keep more specific paths matched first by chi.
+	biometricHandler.RegisterProtectedRoutes(r, jwtSvc) // register / devices / revoke (JWT)
 
 	// --- HTTP server ---
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
