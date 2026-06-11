@@ -24,29 +24,55 @@ type convidadoDoc struct {
 	Nome     string `bson:"nome,omitempty"`
 }
 
+// eventoEnderecoDoc is the BSON sub-doc for the structured event address.
+type eventoEnderecoDoc struct {
+	Rua         string   `bson:"rua,omitempty"`
+	Numero      string   `bson:"numero,omitempty"`
+	Complemento string   `bson:"complemento,omitempty"`
+	Bairro      string   `bson:"bairro,omitempty"`
+	Cidade      string   `bson:"cidade,omitempty"`
+	Estado      string   `bson:"estado,omitempty"`
+	Cep         string   `bson:"cep,omitempty"`
+	PlaceID     string   `bson:"place_id,omitempty"`
+	Latitude    *float64 `bson:"latitude,omitempty"`
+	Longitude   *float64 `bson:"longitude,omitempty"`
+}
+
+// eventoImagemDoc is the BSON sub-doc for an event image.
+type eventoImagemDoc struct {
+	URL          string    `bson:"url"`
+	Ordem        int       `bson:"ordem"`
+	Tipo         string    `bson:"tipo,omitempty"`
+	AdicionadaEm time.Time `bson:"adicionada_em,omitempty"`
+}
+
 // eventoDocument matches Java's MongoDB schema for the 'eventos' collection.
 // _id can be ObjectID (Go-created) or UUID binary (Java-created) — use interface{}.
 type eventoDocument struct {
-	ID                   interface{} `bson:"_id,omitempty"`
-	Nome                 string      `bson:"nome"`
-	Tipo                 string      `bson:"tipo"`
-	DataInicio           time.Time   `bson:"data_inicio"`            // Java: data_inicio (not "data")
-	DataFim              *time.Time  `bson:"data_fim,omitempty"`
-	UsuarioIDResponsavel interface{} `bson:"usuario_id_responsavel"` // UUID binary in Java schema
-	Descricao            string      `bson:"descricao,omitempty"`
-	Local                string      `bson:"local,omitempty"`
-	Status               string      `bson:"status"`
-	LimiteConvidados     *int32      `bson:"limite_convidados,omitempty"`
-	PoliticaConvidados   string      `bson:"politica_convidados,omitempty"`
-	PoliticaCancelamento string      `bson:"politica_cancelamento,omitempty"`
-	RateiosHabilitado    bool        `bson:"rateios_habilitado,omitempty"`
-	PagamentosHabilitado bool        `bson:"pagamentos_habilitado,omitempty"`
-	ImageURL             string      `bson:"image_url,omitempty"`
-	Convidados           []convidadoDoc `bson:"convidados,omitempty"`
-	ModulosAtivos        []string       `bson:"modulos_ativos,omitempty"`
-	ConfiguracaoNicho    map[string]any `bson:"configuracao_nicho,omitempty"`
-	CriadoEm            time.Time   `bson:"criado_em,omitempty"`
-	AtualizadoEm        time.Time   `bson:"atualizado_em,omitempty"` // Java: atualizado_em (not "updated_at")
+	ID                    interface{}       `bson:"_id,omitempty"`
+	Nome                  string            `bson:"nome"`
+	Tipo                  string            `bson:"tipo"`
+	DataInicio            time.Time         `bson:"data_inicio"` // Java: data_inicio (not "data")
+	DataFim               *time.Time        `bson:"data_fim,omitempty"`
+	UsuarioIDResponsavel  interface{}       `bson:"usuario_id_responsavel"` // UUID binary in Java schema
+	Descricao             string            `bson:"descricao,omitempty"`
+	Local                 string            `bson:"local,omitempty"`
+	Status                string            `bson:"status"`
+	LimiteConvidados      *int32            `bson:"limite_convidados,omitempty"`
+	PoliticaConvidados    string            `bson:"politica_convidados,omitempty"`
+	PoliticaCancelamento  string            `bson:"politica_cancelamento,omitempty"`
+	RateiosHabilitado     bool              `bson:"rateios_habilitado,omitempty"`
+	PagamentosHabilitado  bool              `bson:"pagamentos_habilitado,omitempty"`
+	ImageURL              string            `bson:"image_url,omitempty"`
+	Imagens               []eventoImagemDoc `bson:"imagens,omitempty"`
+	Endereco              *eventoEnderecoDoc      `bson:"endereco,omitempty"`
+	Fase                  string            `bson:"fase,omitempty"`
+	PaymentReleaseTrigger string            `bson:"payment_release_trigger,omitempty"`
+	Convidados            []convidadoDoc    `bson:"convidados,omitempty"`
+	ModulosAtivos         []string          `bson:"modulos_ativos,omitempty"`
+	ConfiguracaoNicho     map[string]any    `bson:"configuracao_nicho,omitempty"`
+	CriadoEm              time.Time         `bson:"criado_em,omitempty"`
+	AtualizadoEm          time.Time         `bson:"atualizado_em,omitempty"` // Java: atualizado_em (not "updated_at")
 }
 
 // EventoRepository implements portout.EventoRepository using MongoDB.
@@ -301,23 +327,199 @@ func eventoFromDoc(doc eventoDocument) domain.Evento {
 		v := int(*doc.LimiteConvidados)
 		limite = &v
 	}
-	return domain.Evento{
-		ID:                   rawIDToString(doc.ID),
-		UsuarioID:            rawIDToString(doc.UsuarioIDResponsavel),
-		Nome:                 doc.Nome,
-		Tipo:                 doc.Tipo,
-		Data:                 doc.DataInicio,
-		Descricao:            doc.Descricao,
-		Local:                doc.Local,
-		Status:               domain.EventoStatus(doc.Status),
-		PoliticaConvidados:   doc.PoliticaConvidados,
-		LimiteConvidados:     limite,
-		RateiosHabilitado:    doc.RateiosHabilitado,
-		PagamentosHabilitado: doc.PagamentosHabilitado,
-		PoliticaCancelamento: doc.PoliticaCancelamento,
-		ModulosAtivos:        doc.ModulosAtivos,
-		ConfiguracaoNicho:    doc.ConfiguracaoNicho,
-		CriadoEm:             doc.CriadoEm,
-		UpdatedAt:            doc.AtualizadoEm,
+	imgs := make([]domain.EventoImagem, len(doc.Imagens))
+	for i, d := range doc.Imagens {
+		imgs[i] = domain.EventoImagem{
+			URL:          d.URL,
+			Ordem:        d.Ordem,
+			Tipo:         d.Tipo,
+			AdicionadaEm: d.AdicionadaEm,
+		}
 	}
+	var end *domain.EventoEndereco
+	if doc.Endereco != nil {
+		end = &domain.EventoEndereco{
+			Rua:         doc.Endereco.Rua,
+			Numero:      doc.Endereco.Numero,
+			Complemento: doc.Endereco.Complemento,
+			Bairro:      doc.Endereco.Bairro,
+			Cidade:      doc.Endereco.Cidade,
+			Estado:      doc.Endereco.Estado,
+			Cep:         doc.Endereco.Cep,
+			PlaceID:     doc.Endereco.PlaceID,
+			Latitude:    doc.Endereco.Latitude,
+			Longitude:   doc.Endereco.Longitude,
+		}
+	}
+	return domain.Evento{
+		ID:                    rawIDToString(doc.ID),
+		UsuarioID:             rawIDToString(doc.UsuarioIDResponsavel),
+		Nome:                  doc.Nome,
+		Tipo:                  doc.Tipo,
+		Data:                  doc.DataInicio,
+		DataFim:               doc.DataFim,
+		Descricao:             doc.Descricao,
+		Local:                 doc.Local,
+		Status:                domain.EventoStatus(doc.Status),
+		PoliticaConvidados:    doc.PoliticaConvidados,
+		LimiteConvidados:      limite,
+		RateiosHabilitado:     doc.RateiosHabilitado,
+		PagamentosHabilitado:  doc.PagamentosHabilitado,
+		PoliticaCancelamento:  doc.PoliticaCancelamento,
+		ModulosAtivos:         doc.ModulosAtivos,
+		ConfiguracaoNicho:     doc.ConfiguracaoNicho,
+		Fase:                  domain.EventoFase(doc.Fase),
+		PaymentReleaseTrigger: doc.PaymentReleaseTrigger,
+		Endereco:              end,
+		ImageURL:              doc.ImageURL,
+		Imagens:               imgs,
+		CriadoEm:              doc.CriadoEm,
+		UpdatedAt:             doc.AtualizadoEm,
+	}
+}
+
+// FindAllByIDs returns the events whose IDs are in the given list. Java-created
+// IDs are stored as UUID Binary subtype 4; Go-created may be ObjectIDs. We
+// query with an $in containing every viable representation.
+func (r *EventoRepository) FindAllByIDs(ctx context.Context, ids []string) ([]domain.Evento, error) {
+	if len(ids) == 0 {
+		return []domain.Evento{}, nil
+	}
+	values := make([]interface{}, 0, len(ids))
+	for _, id := range ids {
+		if oid, err := bson.ObjectIDFromHex(id); err == nil {
+			values = append(values, oid)
+			continue
+		}
+		parts := id
+		_ = parts
+		if u, err := uuid.Parse(id); err == nil {
+			b := [16]byte(u)
+			values = append(values, bson.Binary{Subtype: 0x04, Data: b[:]})
+			continue
+		}
+		values = append(values, id)
+	}
+	filter := bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: values}}}}
+	cur, err := r.col.Find(ctx, filter)
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+	var docs []eventoDocument
+	if err := cur.All(ctx, &docs); err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	result := make([]domain.Evento, len(docs))
+	for i, d := range docs {
+		result[i] = eventoFromDoc(d)
+	}
+	return result, nil
+}
+
+// UpdateFase atomically updates only the fase field and atualizado_em.
+func (r *EventoRepository) UpdateFase(ctx context.Context, id string, fase domain.EventoFase) error {
+	filter := parseIDToFilter(id)
+	now := time.Now().UTC()
+	update := bson.D{{Key: "$set", Value: bson.D{
+		{Key: "fase", Value: string(fase)},
+		{Key: "atualizado_em", Value: now},
+	}}}
+	res, err := r.col.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return apierr.Internal(err.Error())
+	}
+	if res.MatchedCount == 0 {
+		return apierr.NotFound("evento", id)
+	}
+	return nil
+}
+
+// UpdatePoliticaConvidados atomically updates politica_convidados field.
+func (r *EventoRepository) UpdatePoliticaConvidados(ctx context.Context, id, politica string) error {
+	filter := parseIDToFilter(id)
+	now := time.Now().UTC()
+	update := bson.D{{Key: "$set", Value: bson.D{
+		{Key: "politica_convidados", Value: politica},
+		{Key: "atualizado_em", Value: now},
+	}}}
+	res, err := r.col.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return apierr.Internal(err.Error())
+	}
+	if res.MatchedCount == 0 {
+		return apierr.NotFound("evento", id)
+	}
+	return nil
+}
+
+// AddImagens appends a list of images to the event's imagens array using $push/$each.
+func (r *EventoRepository) AddImagens(ctx context.Context, id string, imagens []domain.EventoImagem) error {
+	if len(imagens) == 0 {
+		return nil
+	}
+	filter := parseIDToFilter(id)
+	docs := make([]eventoImagemDoc, len(imagens))
+	for i, im := range imagens {
+		docs[i] = eventoImagemDoc{
+			URL:          im.URL,
+			Ordem:        im.Ordem,
+			Tipo:         im.Tipo,
+			AdicionadaEm: im.AdicionadaEm,
+		}
+	}
+	now := time.Now().UTC()
+	update := bson.D{
+		{Key: "$push", Value: bson.D{{Key: "imagens", Value: bson.D{{Key: "$each", Value: docs}}}}},
+		{Key: "$set", Value: bson.D{{Key: "atualizado_em", Value: now}}},
+	}
+	res, err := r.col.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return apierr.Internal(err.Error())
+	}
+	if res.MatchedCount == 0 {
+		return apierr.NotFound("evento", id)
+	}
+	return nil
+}
+
+// UpdateDetalhes patches editable detail fields and returns the updated event.
+func (r *EventoRepository) UpdateDetalhes(ctx context.Context, e *domain.Evento) (*domain.Evento, error) {
+	filter := parseIDToFilter(e.ID)
+	now := time.Now().UTC()
+	setDoc := bson.D{
+		{Key: "nome", Value: e.Nome},
+		{Key: "tipo", Value: e.Tipo},
+		{Key: "descricao", Value: e.Descricao},
+		{Key: "local", Value: e.Local},
+		{Key: "data_inicio", Value: e.Data},
+		{Key: "atualizado_em", Value: now},
+	}
+	if e.DataFim != nil {
+		setDoc = append(setDoc, bson.E{Key: "data_fim", Value: *e.DataFim})
+	}
+	if e.Endereco != nil {
+		setDoc = append(setDoc, bson.E{Key: "endereco", Value: eventoEnderecoDoc{
+			Rua:         e.Endereco.Rua,
+			Numero:      e.Endereco.Numero,
+			Complemento: e.Endereco.Complemento,
+			Bairro:      e.Endereco.Bairro,
+			Cidade:      e.Endereco.Cidade,
+			Estado:      e.Endereco.Estado,
+			Cep:         e.Endereco.Cep,
+			PlaceID:     e.Endereco.PlaceID,
+			Latitude:    e.Endereco.Latitude,
+			Longitude:   e.Endereco.Longitude,
+		}})
+	}
+	update := bson.D{{Key: "$set", Value: setDoc}}
+	res, err := r.col.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	if res.MatchedCount == 0 {
+		return nil, apierr.NotFound("evento", e.ID)
+	}
+	e.UpdatedAt = now
+	return e, nil
 }

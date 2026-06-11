@@ -231,6 +231,11 @@ func main() {
 		createEventoUC, getEventoUC, listEventosUC, updateEventoUC, deleteEventoUC,
 		listEventosByUsuarioUC, addConvidadosUC,
 	)
+
+	// --- CSE_014: Eventos Advanced (fase/imagens/summaries/politica/detalhes/gerenciar/public-info/join/completo) ---
+	// txRepo is created later in Phase 5 (line ~283). We will wire after it exists.
+	// participantRepo (read-side) for completo is created later in Phase Finance (line ~519).
+	// We defer construction below where all repos exist.
 	draftHandler := handler.NewDraftHandler(
 		createDraftUC, getDraftUC, listDraftsUC, updateDraftUC, deleteDraftUC, publishDraftUC,
 		validateDraftUC,
@@ -520,6 +525,29 @@ func main() {
 	financeInstallmentRepo := mongodb.NewFinanceInstallmentRepository(mongoClient)
 	financeAccountRepo := mongodb.NewFinanceAccountRepository(mongoClient)
 
+	// --- CSE_014: Eventos Advanced wiring (after all repos exist) ---
+	eventoImagemStorage := mongodb.NewEventoImagemStorageAdapter(mongoClient)
+	alterarFaseUC := ucevent.NewAlterarFase(eventoRepo, participanteRepo, txRepo)
+	uploadImagensUC := ucevent.NewUploadImagens(eventoRepo, eventoImagemStorage)
+	buscarSummariesUC := ucevent.NewBuscarSummaries(eventoRepo)
+	atualizarPoliticaUC := ucevent.NewAtualizarPoliticaConvidados(eventoRepo, participanteRepo)
+	atualizarDetalhesUC := ucevent.NewAtualizarDetalhes(eventoRepo, participanteRepo)
+	gerenciarUC := ucevent.NewGerenciarEvento(eventoRepo, participanteRepo, txRepo)
+	getCompletoUC := ucevent.NewGetEventoCompleto(eventoRepo, participantRepo, rateioRepo)
+	getPublicInfoUC := ucevent.NewGetPublicInfo(eventoRepo, participanteRepo, usuarioRepo)
+	joinEventoUC := ucevent.NewJoinEvento(eventoRepo, participanteRepo)
+	eventoHandler = eventoHandler.WithAdvanced(
+		alterarFaseUC,
+		uploadImagensUC,
+		buscarSummariesUC,
+		atualizarPoliticaUC,
+		atualizarDetalhesUC,
+		gerenciarUC,
+		getCompletoUC,
+		getPublicInfoUC,
+		joinEventoUC,
+	)
+
 	listEventsUC := ucfinance.NewListFinanceEvents(participantRepo, eventoRepo, rateioRepo, financeSummaryRepo)
 	overviewUC := ucfinance.NewGetFinanceOverview(eventoRepo, participantRepo, rateioRepo, financeSummaryRepo)
 	ledgerUC := ucfinance.NewGetLedgerStatement(ledgerEntryRepo, participantRepo)
@@ -587,6 +615,7 @@ func main() {
 	configHandler.RegisterRoutes(r)          // GET /api/v1/dominios (public read) + admin write
 	cardapioHandler.RegisterCardapioRoutes(r) // GET /api/cardapios (public — Java parity)
 	paymentWebhookHandler.RegisterWebhookRoutes(r) // POST /api/v1/webhooks/payment/asaas (no JWT)
+	eventoHandler.RegisterPublicEventRoutes(r) // CSE_014 — GET /api/v1/eventos/{eventId}/public-info (no JWT)
 
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {

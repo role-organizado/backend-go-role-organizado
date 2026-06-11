@@ -261,6 +261,32 @@ func (r *PaymentTransactionRepository) FindPendingOlderThan(ctx context.Context,
 	return results, nil
 }
 
+// FindByEventID returns all transactions for the given event, ordered by createdAt asc.
+func (r *PaymentTransactionRepository) FindByEventID(ctx context.Context, eventID string) ([]*domain.PaymentTransaction, error) {
+	filter := bson.D{{Key: "eventId", Value: eventID}}
+	cur, err := r.col.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}))
+	if err != nil {
+		return nil, apierr.Internal(fmt.Sprintf("find payment transactions by event: %s", err.Error()))
+	}
+	defer cur.Close(ctx)
+	var results []*domain.PaymentTransaction
+	for cur.Next(ctx) {
+		var doc paymentTransactionDocument
+		if err := cur.Decode(&doc); err != nil {
+			return nil, apierr.Internal(fmt.Sprintf("decode payment transaction: %s", err.Error()))
+		}
+		tx := paymentTxFromDoc(doc)
+		results = append(results, &tx)
+	}
+	if err := cur.Err(); err != nil {
+		return nil, apierr.Internal(fmt.Sprintf("cursor payment transactions by event: %s", err.Error()))
+	}
+	if results == nil {
+		results = []*domain.PaymentTransaction{}
+	}
+	return results, nil
+}
+
 // ---- mapping helpers ----
 
 func paymentTxToDoc(tx *domain.PaymentTransaction) paymentTransactionDocument {

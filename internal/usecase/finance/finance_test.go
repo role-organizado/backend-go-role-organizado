@@ -43,6 +43,9 @@ func (s *stubParticipantRepo) FindByEventID(_ context.Context, _ string, _, _ in
 func (s *stubParticipantRepo) FindByEventIDAndUserID(_ context.Context, _, _ string) (*domain.Participant, error) {
 	return s.single, s.singleErr
 }
+func (s *stubParticipantRepo) FindAllByEventID(_ context.Context, _ string) ([]domain.Participant, error) {
+	return s.byEvent, s.eventErr
+}
 
 // stubEventoRepo implements portout.EventoRepository.
 type stubEventoRepo struct {
@@ -71,6 +74,21 @@ func (s *stubEventoRepo) Update(_ context.Context, e *domainevent.Evento) (*doma
 func (s *stubEventoRepo) DeleteByID(_ context.Context, _ string) error { return nil }
 func (s *stubEventoRepo) AddConvidados(_ context.Context, _ string, _ []domainevent.Convidado) error {
 	return nil
+}
+func (s *stubEventoRepo) FindAllByIDs(_ context.Context, _ []string) ([]domainevent.Evento, error) {
+	return nil, nil
+}
+func (s *stubEventoRepo) UpdateFase(_ context.Context, _ string, _ domainevent.EventoFase) error {
+	return nil
+}
+func (s *stubEventoRepo) UpdatePoliticaConvidados(_ context.Context, _, _ string) error {
+	return nil
+}
+func (s *stubEventoRepo) AddImagens(_ context.Context, _ string, _ []domainevent.EventoImagem) error {
+	return nil
+}
+func (s *stubEventoRepo) UpdateDetalhes(_ context.Context, e *domainevent.Evento) (*domainevent.Evento, error) {
+	return e, nil
 }
 
 // stubRateioRepo implements portout.RateioRepository.

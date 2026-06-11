@@ -42,6 +42,9 @@ type PaymentTransactionRepository interface {
 	// FindPendingOlderThan returns PENDING/PROCESSING transactions created before
 	// threshold, used by expiration and reconciliation workflows.
 	FindPendingOlderThan(ctx context.Context, threshold time.Time) ([]*domain.PaymentTransaction, error)
+	// FindByEventID returns all transactions for the given event regardless of
+	// status. Used by alterarFase and gerenciar to detect COMPLETED payments.
+	FindByEventID(ctx context.Context, eventID string) ([]*domain.PaymentTransaction, error)
 }
 
 // PaymentInstallmentRepository is the persistence contract for PaymentInstallment.

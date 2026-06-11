@@ -23,6 +23,17 @@ type EventHandler struct {
 	deleteUC        portin.DeleteEventoUseCase
 	listByUsuarioUC portin.ListEventosByUsuarioUseCase
 	addConvidadosUC portin.AddConvidadosUseCase
+
+	// CSE_014 — advanced endpoints.
+	alterarFaseUC       portin.AlterarFaseUseCase
+	uploadImagensUC     portin.UploadImagensUseCase
+	buscarSummariesUC   portin.BuscarSummariesUseCase
+	atualizarPoliticaUC portin.AtualizarPoliticaConvidadosUseCase
+	atualizarDetalhesUC portin.AtualizarDetalhesUseCase
+	gerenciarUC         portin.GerenciarEventoUseCase
+	getCompletoUC       portin.GetEventoCompletoUseCase
+	getPublicInfoUC     portin.GetPublicInfoUseCase
+	joinEventoUC        portin.JoinEventoUseCase
 }
 
 // NewEventHandler creates a new EventHandler.
@@ -46,6 +57,31 @@ func NewEventHandler(
 	}
 }
 
+// WithAdvanced wires the CSE_014 advanced use cases on top of the existing handler.
+// Kept as a separate setter so we do not break any existing NewEventHandler call sites.
+func (h *EventHandler) WithAdvanced(
+	alterarFase portin.AlterarFaseUseCase,
+	uploadImagens portin.UploadImagensUseCase,
+	buscarSummaries portin.BuscarSummariesUseCase,
+	atualizarPolitica portin.AtualizarPoliticaConvidadosUseCase,
+	atualizarDetalhes portin.AtualizarDetalhesUseCase,
+	gerenciar portin.GerenciarEventoUseCase,
+	getCompleto portin.GetEventoCompletoUseCase,
+	getPublicInfo portin.GetPublicInfoUseCase,
+	joinEvento portin.JoinEventoUseCase,
+) *EventHandler {
+	h.alterarFaseUC = alterarFase
+	h.uploadImagensUC = uploadImagens
+	h.buscarSummariesUC = buscarSummaries
+	h.atualizarPoliticaUC = atualizarPolitica
+	h.atualizarDetalhesUC = atualizarDetalhes
+	h.gerenciarUC = gerenciar
+	h.getCompletoUC = getCompleto
+	h.getPublicInfoUC = getPublicInfo
+	h.joinEventoUC = joinEvento
+	return h
+}
+
 // RegisterEventRoutes mounts event routes onto the given router.
 func (h *EventHandler) RegisterEventRoutes(r chi.Router) {
 	r.Get("/api/eventos", h.listEvento)
@@ -54,11 +90,46 @@ func (h *EventHandler) RegisterEventRoutes(r chi.Router) {
 	r.Get("/api/eventos/usuario/{usuarioId}", h.listEventoByUsuario)
 	// v1 versioned alias — same handler, identical behaviour
 	r.Get("/api/eventos/v1/eventos/usuario/{userId}", h.listEventoByUsuarioV1)
+	// Static prefixes (summaries) and specific sub-paths must precede /{id}.
+	if h.buscarSummariesUC != nil {
+		r.Post("/api/eventos/v1/eventos/summaries", h.buscarSummaries)
+	}
 	r.Get("/api/eventos/{id}", h.getEvento)
 	r.Put("/api/eventos/{id}", h.updateEvento)
 	r.Delete("/api/eventos/{id}", h.deleteEvento)
 	// Convidados
 	r.Post("/api/eventos/v1/eventos/{eventoId}/convidados", h.addConvidados)
+
+	// CSE_014 advanced endpoints (JWT-protected — public-info/join are registered separately).
+	if h.alterarFaseUC != nil {
+		r.Post("/api/eventos/v1/eventos/{id}/fase", h.alterarFase)
+	}
+	if h.uploadImagensUC != nil {
+		r.Post("/api/eventos/v1/eventos/{id}/imagens", h.uploadImagens)
+	}
+	if h.atualizarPoliticaUC != nil {
+		r.Patch("/api/eventos/v1/eventos/{eventoId}/politica-convidados", h.atualizarPoliticaConvidados)
+	}
+	if h.atualizarDetalhesUC != nil {
+		r.Patch("/api/eventos/v1/eventos/{id}/detalhes", h.atualizarDetalhes)
+	}
+	if h.gerenciarUC != nil {
+		r.Get("/api/eventos/v1/eventos/{id}/gerenciar", h.gerenciarEvento)
+	}
+	if h.getCompletoUC != nil {
+		r.Get("/api/eventos/v1/eventos/{id}/completo", h.getEventoCompleto)
+	}
+	if h.joinEventoUC != nil {
+		r.Post("/api/v1/eventos/{eventId}/join", h.joinEvento)
+	}
+}
+
+// RegisterPublicEventRoutes mounts the public (no-auth) routes. Must be invoked
+// OUTSIDE the JWT group in main.go.
+func (h *EventHandler) RegisterPublicEventRoutes(r chi.Router) {
+	if h.getPublicInfoUC != nil {
+		r.Get("/api/v1/eventos/{eventId}/public-info", h.getPublicInfo)
+	}
 }
 
 // ---- request/response DTOs ----

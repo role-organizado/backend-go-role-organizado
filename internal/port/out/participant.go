@@ -17,6 +17,30 @@ type ParticipanteRepository interface {
 	// IsParticipantOfEvent reports whether the user has any participation record
 	// in the given event (any papel or status).
 	IsParticipantOfEvent(ctx context.Context, eventID, userID string) (bool, error)
+	// CountConfirmedByEventID returns the number of CONFIRMADO participants in the event.
+	CountConfirmedByEventID(ctx context.Context, eventID string) (int64, error)
+	// CountByEventIDAndStatus returns the number of participants matching status filter.
+	CountByEventIDAndStatus(ctx context.Context, eventID, status string) (int64, error)
+	// CountNonOrganizadorByEventID counts participants whose papel is neither
+	// ORGANIZADOR nor CO_ORGANIZADOR. Used by alterarFase to validate the
+	// "advance to PREPARACAO requires >=1 convidado" rule.
+	CountNonOrganizadorByEventID(ctx context.Context, eventID string) (int64, error)
+	// HasOrganizadorPapel returns true if the user is ORGANIZADOR or CO_ORGANIZADOR
+	// of the given event.
+	HasOrganizadorPapel(ctx context.Context, eventID, userID string) (bool, error)
+	// CreateParticipant inserts a new participant. Used by join. Returns the new ID.
+	CreateParticipant(ctx context.Context, p NewParticipant) (string, error)
+}
+
+// NewParticipant is the input payload for write-side participant creation.
+type NewParticipant struct {
+	EventID          string
+	UserID           string
+	TipoParticipante string // USER | GUEST
+	Papel            string // ORGANIZADOR | CO_ORGANIZADOR | CONVIDADO
+	Status           string // PENDENTE | CONFIRMADO | RECUSADO
+	Nome             string
+	Email            string
 }
 
 // ParticipantRepository defines read-side persistence for event participants (finance domain).
@@ -28,6 +52,8 @@ type ParticipantRepository interface {
 	// FindByEventIDAndUserID returns the participation for a specific user in a specific event.
 	// Returns an error (e.g. apierr.NotFound) if the participation does not exist.
 	FindByEventIDAndUserID(ctx context.Context, eventID, userID string) (*domain.Participant, error)
+	// FindAllByEventID returns the full participant list (no pagination) for the event.
+	FindAllByEventID(ctx context.Context, eventID string) ([]domain.Participant, error)
 }
 
 // PaymentInstallmentRepository defines persistence for payment installments.
