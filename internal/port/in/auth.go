@@ -73,6 +73,9 @@ type AppleAuthUseCase interface {
 }
 
 // UpdateUsuarioInput is the payload for user profile updates.
+// All fields are optional: scalar zero values are ignored; pointer fields
+// are nil-skipped — this matches Java's UsuarioController.partialUpdate
+// fetch-then-patch semantics.
 type UpdateUsuarioInput struct {
 	Nome       string
 	Email      string
@@ -80,6 +83,9 @@ type UpdateUsuarioInput struct {
 	FotoPerfil string
 	Telefone   *auth.Telefone
 	Endereco   *auth.Endereco
+	// AiMemoryOptOut, when non-nil, sets the user's AI memory opt-out flag.
+	// nil means "do not change" (legacy partial-update semantics).
+	AiMemoryOptOut *bool
 }
 
 // UpdateUsuarioUseCase updates an existing user profile.

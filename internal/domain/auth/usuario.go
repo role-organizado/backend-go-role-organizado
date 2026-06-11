@@ -55,6 +55,11 @@ type Usuario struct {
 	ProviderLogin  []ProviderLogin
 	Roles          []Role
 	Ativo          bool
+	// AiMemoryOptOut is a tri-state flag (nil = default behaviour, not-opted-out).
+	// When true, the BFF must NOT inject the user's AI memory context into the AI
+	// Wizard prompt. Backfilled from Java's UsuarioController.partialUpdate
+	// (field aiMemoryOptOut). Default value when explicitly set is false.
+	AiMemoryOptOut *bool
 	CriadoEm      time.Time
 	UpdatedAt      time.Time
 }
