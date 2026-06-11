@@ -70,6 +70,9 @@ type usuarioDetailResponse struct {
 	Endereco   *enderecoReq        `json:"endereco,omitempty"`
 	Roles      []string            `json:"roles"`
 	Ativo      bool                `json:"ativo"`
+	// AiMemoryOptOut is omitted from the response when nil (preserves the legacy
+	// payload shape for clients that don't know about the field yet).
+	AiMemoryOptOut *bool            `json:"aiMemoryOptOut,omitempty"`
 	CriadoEm  time.Time           `json:"criadoEm"`
 	UpdatedAt  time.Time           `json:"updatedAt"`
 }
@@ -81,6 +84,9 @@ type updateUsuarioRequest struct {
 	FotoPerfil string       `json:"fotoPerfil"`
 	Telefone   *telefoneReq `json:"telefone"`
 	Endereco   *enderecoReq `json:"endereco"`
+	// AiMemoryOptOut is a pointer so the JSON decoder can distinguish
+	// "field absent" (nil → leave untouched) from "field present and false".
+	AiMemoryOptOut *bool       `json:"aiMemoryOptOut"`
 }
 
 type telefoneReq struct {
@@ -140,7 +146,7 @@ func (h *UsuarioHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
 		return
 	}
-	in := portin.UpdateUsuarioInput{Nome: req.Nome, Email: req.Email, CPF: req.CPF, FotoPerfil: req.FotoPerfil}
+	in := portin.UpdateUsuarioInput{Nome: req.Nome, Email: req.Email, CPF: req.CPF, FotoPerfil: req.FotoPerfil, AiMemoryOptOut: req.AiMemoryOptOut}
 	if req.Telefone != nil {
 		in.Telefone = &auth.Telefone{DDI: req.Telefone.DDI, DDD: req.Telefone.DDD, Numero: req.Telefone.Numero, Tipo: req.Telefone.Tipo}
 	}
@@ -178,7 +184,7 @@ func (h *UsuarioHandler) UpdateByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierr.BadRequest("corpo da requisição inválido"))
 		return
 	}
-	in := portin.UpdateUsuarioInput{Nome: req.Nome, Email: req.Email, CPF: req.CPF, FotoPerfil: req.FotoPerfil}
+	in := portin.UpdateUsuarioInput{Nome: req.Nome, Email: req.Email, CPF: req.CPF, FotoPerfil: req.FotoPerfil, AiMemoryOptOut: req.AiMemoryOptOut}
 	if req.Telefone != nil {
 		in.Telefone = &auth.Telefone{DDI: req.Telefone.DDI, DDD: req.Telefone.DDD, Numero: req.Telefone.Numero, Tipo: req.Telefone.Tipo}
 	}
@@ -310,6 +316,7 @@ func toUsuarioDetailResponse(u auth.Usuario) usuarioDetailResponse {
 		FotoPerfil: u.FotoPerfil,
 		Roles:     roles,
 		Ativo:     u.Ativo,
+		AiMemoryOptOut: u.AiMemoryOptOut,
 		CriadoEm: u.CriadoEm,
 		UpdatedAt: u.UpdatedAt,
 	}

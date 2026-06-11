@@ -365,6 +365,17 @@ func main() {
 	)
 	paymentWebhookHandler := handler.NewPaymentWebhookHandler(handlePaymentCallbackUC, cfg.Asaas.WebhookToken)
 
+	// === WHATSAPP WEBHOOK ===
+	// Backfill: Meta WhatsApp Business Cloud API webhook (paridade Java
+	// WhatsAppWebhookController) — POST callback + GET hub.challenge verify.
+	// Reuses the same ProcessedWebhookEventRepository (provider="WHATSAPP") for
+	// idempotency.
+	handleWhatsAppWebhookUC := ucnotification.NewHandleWhatsAppWebhook(webhookRepo)
+	whatsappWebhookHandler := handler.NewWhatsAppWebhookHandler(
+		handleWhatsAppWebhookUC,
+		cfg.WhatsApp.WebhookVerifyToken,
+	)
+
 	// --- Phase 7: File Storage (GridFS) ---
 	arquivoRepo := mongodb.NewArquivoRepository(mongoClient)
 	gridfsStorage := mongodb.NewGridFSStorageAdapter(mongoClient)
@@ -587,6 +598,7 @@ func main() {
 	configHandler.RegisterRoutes(r)          // GET /api/v1/dominios (public read) + admin write
 	cardapioHandler.RegisterCardapioRoutes(r) // GET /api/cardapios (public — Java parity)
 	paymentWebhookHandler.RegisterWebhookRoutes(r) // POST /api/v1/webhooks/payment/asaas (no JWT)
+	whatsappWebhookHandler.RegisterWebhookRoutes(r) // POST + GET /api/v1/webhooks/notifications/whatsapp (no JWT)
 
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {

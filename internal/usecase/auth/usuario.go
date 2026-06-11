@@ -62,6 +62,9 @@ func (uc *UpdateUsuario) Execute(ctx context.Context, usuarioID string, in porti
 	if in.Endereco != nil {
 		usuario.Endereco = in.Endereco
 	}
+	if in.AiMemoryOptOut != nil {
+		usuario.AiMemoryOptOut = in.AiMemoryOptOut
+	}
 
 	return uc.usuarios.Update(ctx, usuario)
 }

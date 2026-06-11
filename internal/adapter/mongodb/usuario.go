@@ -57,6 +57,10 @@ type usuarioDocument struct {
 	ProviderLogin  []providerLoginDoc `bson:"provider_login,omitempty"`
 	Roles          []string           `bson:"roles"`
 	Ativo          bool               `bson:"ativo"`
+	// AiMemoryOptOut is a nilable boolean — pointer + omitempty so the document
+	// stays untouched when the caller doesn't supply a value. Matches Java's
+	// camelCase BSON field 'aiMemoryOptOut'.
+	AiMemoryOptOut *bool              `bson:"aiMemoryOptOut,omitempty"`
 	CriadoEm      time.Time          `bson:"criado_em"`
 	UpdatedAt      time.Time          `bson:"updated_at"`
 }
@@ -173,6 +177,9 @@ func (r *UsuarioRepository) Update(ctx context.Context, u *auth.Usuario) (*auth.
 	if len(doc.ProviderLogin) > 0 {
 		setFields = append(setFields, bson.E{Key: "provider_login", Value: doc.ProviderLogin})
 	}
+	if doc.AiMemoryOptOut != nil {
+		setFields = append(setFields, bson.E{Key: "aiMemoryOptOut", Value: *doc.AiMemoryOptOut})
+	}
 
 	update := bson.D{{Key: "$set", Value: setFields}}
 	if _, err := r.col.UpdateOne(ctx, filter, update); err != nil {
@@ -266,6 +273,7 @@ func usuarioFromDoc(doc usuarioDocument) auth.Usuario {
 		ProviderLogin: providers,
 		Roles:         roles,
 		Ativo:         doc.Ativo,
+		AiMemoryOptOut: doc.AiMemoryOptOut,
 		CriadoEm:     doc.CriadoEm,
 		UpdatedAt:     doc.UpdatedAt,
 	}
@@ -300,6 +308,7 @@ func usuarioToDoc(u *auth.Usuario) usuarioDocument {
 		ProviderLogin: providers,
 		Roles:         roles,
 		Ativo:         u.Ativo,
+		AiMemoryOptOut: u.AiMemoryOptOut,
 	}
 	if u.Telefone != nil {
 		doc.Telefone = &telefoneDoc{DDI: u.Telefone.DDI, DDD: u.Telefone.DDD, Numero: u.Telefone.Numero, Tipo: u.Telefone.Tipo}

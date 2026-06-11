@@ -22,6 +22,7 @@ type AppConfig struct {
 	Redis    RedisConfig
 	SQS      SQSConfig
 	Asaas    AsaasConfig
+	WhatsApp WhatsAppConfig
 }
 
 // ServerConfig holds HTTP server settings.
@@ -87,6 +88,14 @@ type RedisConfig struct {
 type SQSConfig struct {
 	Region    string
 	QueueURL  string
+}
+
+// WhatsAppConfig holds Meta WhatsApp Business Cloud API settings.
+type WhatsAppConfig struct {
+	// WebhookVerifyToken is the shared secret used during Meta's GET hub.challenge
+	// handshake. Empty string → dev mode (any verify_token is accepted), mirroring
+	// the Asaas webhook pattern. Set via ROLE_WHATSAPP_WEBHOOK_VERIFY_TOKEN.
+	WebhookVerifyToken string
 }
 
 // AsaasConfig holds Asaas PSP API settings.
@@ -187,6 +196,9 @@ func Load() (*AppConfig, error) {
 			APIKey:       v.GetString("asaas.api_key"),
 			WebhookToken: v.GetString("asaas.webhook_token"),
 			UseMock:      v.GetBool("asaas.use_mock"),
+		},
+		WhatsApp: WhatsAppConfig{
+			WebhookVerifyToken: v.GetString("whatsapp.webhook_verify_token"),
 		},
 	}
 
