@@ -240,6 +240,21 @@ func (m *mockEventoRepository) DeleteByID(_ context.Context, id string) error {
 func (m *mockEventoRepository) AddConvidados(_ context.Context, id string, c []domain_event.Convidado) error {
 	return nil
 }
+func (m *mockEventoRepository) FindAllByIDs(_ context.Context, _ []string) ([]domain_event.Evento, error) {
+	return nil, nil
+}
+func (m *mockEventoRepository) UpdateFase(_ context.Context, _ string, _ domain_event.EventoFase) error {
+	return nil
+}
+func (m *mockEventoRepository) UpdatePoliticaConvidados(_ context.Context, _, _ string) error {
+	return nil
+}
+func (m *mockEventoRepository) AddImagens(_ context.Context, _ string, _ []domain_event.EventoImagem) error {
+	return nil
+}
+func (m *mockEventoRepository) UpdateDetalhes(_ context.Context, e *domain_event.Evento) (*domain_event.Evento, error) {
+	return e, nil
+}
 
 // TestCancelParticipantInstallments_Integration_OnlyPendingAndOverdue verifies
 // that the CancelParticipantInstallments use case cancels only PENDING and

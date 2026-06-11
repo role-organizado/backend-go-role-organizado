@@ -73,6 +73,14 @@ func (m *mockTxRepo) FindCompletedByEventID(ctx context.Context, eventID string,
 	return args.Get(0).([]*domain.PaymentTransaction), args.Error(1)
 }
 
+func (m *mockTxRepo) FindByEventID(ctx context.Context, eventID string) ([]*domain.PaymentTransaction, error) {
+	args := m.Called(ctx, eventID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.PaymentTransaction), args.Error(1)
+}
+
 // ─── Mock: AsaasCustomerLinkRepository ──────────────────────────────────────
 
 type mockCustomerLinkRepo struct{ mock.Mock }

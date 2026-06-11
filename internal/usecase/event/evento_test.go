@@ -38,6 +38,31 @@ func (m *mockParticipanteRepo) IsParticipantOfEvent(ctx context.Context, eventID
 	return args.Bool(0), args.Error(1)
 }
 
+func (m *mockParticipanteRepo) CountConfirmedByEventID(ctx context.Context, eventID string) (int64, error) {
+	args := m.Called(ctx, eventID)
+	return int64(args.Int(0)), args.Error(1)
+}
+
+func (m *mockParticipanteRepo) CountByEventIDAndStatus(ctx context.Context, eventID, status string) (int64, error) {
+	args := m.Called(ctx, eventID, status)
+	return int64(args.Int(0)), args.Error(1)
+}
+
+func (m *mockParticipanteRepo) CountNonOrganizadorByEventID(ctx context.Context, eventID string) (int64, error) {
+	args := m.Called(ctx, eventID)
+	return int64(args.Int(0)), args.Error(1)
+}
+
+func (m *mockParticipanteRepo) HasOrganizadorPapel(ctx context.Context, eventID, userID string) (bool, error) {
+	args := m.Called(ctx, eventID, userID)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *mockParticipanteRepo) CreateParticipant(ctx context.Context, p portout.NewParticipant) (string, error) {
+	args := m.Called(ctx, p)
+	return args.String(0), args.Error(1)
+}
+
 type mockEventoRepo struct{ mock.Mock }
 
 func (m *mockEventoRepo) FindByID(ctx context.Context, id string) (*domain.Evento, error) {
@@ -87,6 +112,37 @@ func (m *mockEventoRepo) DeleteByID(ctx context.Context, id string) error {
 func (m *mockEventoRepo) AddConvidados(ctx context.Context, eventoID string, convidados []domain.Convidado) error {
 	args := m.Called(ctx, eventoID, convidados)
 	return args.Error(0)
+}
+
+func (m *mockEventoRepo) FindAllByIDs(ctx context.Context, ids []string) ([]domain.Evento, error) {
+	args := m.Called(ctx, ids)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]domain.Evento), args.Error(1)
+}
+
+func (m *mockEventoRepo) UpdateFase(ctx context.Context, id string, fase domain.EventoFase) error {
+	args := m.Called(ctx, id, fase)
+	return args.Error(0)
+}
+
+func (m *mockEventoRepo) UpdatePoliticaConvidados(ctx context.Context, id, politica string) error {
+	args := m.Called(ctx, id, politica)
+	return args.Error(0)
+}
+
+func (m *mockEventoRepo) AddImagens(ctx context.Context, id string, imagens []domain.EventoImagem) error {
+	args := m.Called(ctx, id, imagens)
+	return args.Error(0)
+}
+
+func (m *mockEventoRepo) UpdateDetalhes(ctx context.Context, e *domain.Evento) (*domain.Evento, error) {
+	args := m.Called(ctx, e)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Evento), args.Error(1)
 }
 
 // ---- helpers ----

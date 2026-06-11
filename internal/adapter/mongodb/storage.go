@@ -142,3 +142,28 @@ func (g *GridFSStorageAdapter) Delete(ctx context.Context, gridFSID string) erro
 	}
 	return nil
 }
+
+// EventoImagemStorageAdapter writes event images to a dedicated GridFS bucket
+// ('eventos-imagens') and produces a download URL compatible with the public
+// storage handler.
+type EventoImagemStorageAdapter struct {
+	bucket *mongo.GridFSBucket
+}
+
+// NewEventoImagemStorageAdapter wires the eventos-imagens GridFS bucket.
+func NewEventoImagemStorageAdapter(client *Client) *EventoImagemStorageAdapter {
+	bucket := client.DB().GridFSBucket(options.GridFSBucket().SetName("eventos-imagens"))
+	return &EventoImagemStorageAdapter{bucket: bucket}
+}
+
+// UploadImage uploads an image to the eventos-imagens bucket and returns its
+// (fileID, publicURL). The URL pattern matches Java: /api/eventos/imagens/{id}.
+func (g *EventoImagemStorageAdapter) UploadImage(ctx context.Context, filename, contentType string, data []byte) (string, string, error) {
+	uploadOpts := options.GridFSUpload().SetMetadata(bson.M{"content_type": contentType})
+	fileID, err := g.bucket.UploadFromStream(ctx, filename, bytes.NewReader(data), uploadOpts)
+	if err != nil {
+		return "", "", err
+	}
+	id := fileID.Hex()
+	return id, "/api/eventos/imagens/" + id, nil
+}

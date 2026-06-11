@@ -37,6 +37,20 @@ type EventoRepository interface {
 	Update(ctx context.Context, e *event.Evento) (*event.Evento, error)
 	DeleteByID(ctx context.Context, id string) error
 	AddConvidados(ctx context.Context, eventoID string, convidados []event.Convidado) error
+
+	// FindAllByIDs returns the events whose IDs are in the given list. IDs not
+	// found are silently omitted (no error). Used by the BuscarSummaries batch
+	// endpoint.
+	FindAllByIDs(ctx context.Context, ids []string) ([]event.Evento, error)
+	// UpdateFase atomically updates the fase field and atualizado_em.
+	UpdateFase(ctx context.Context, id string, fase event.EventoFase) error
+	// UpdatePoliticaConvidados atomically updates politica_convidados.
+	UpdatePoliticaConvidados(ctx context.Context, id, politica string) error
+	// AddImagens appends a list of images to the event's imagens array.
+	AddImagens(ctx context.Context, id string, imagens []event.EventoImagem) error
+	// UpdateDetalhes patches editable detail fields: nome/tipo/descricao/local/
+	// data_inicio/data_fim/endereco. Returns the updated event.
+	UpdateDetalhes(ctx context.Context, e *event.Evento) (*event.Evento, error)
 }
 
 // EventoDraftRepository defines persistence operations for event drafts.

@@ -192,3 +192,231 @@ type AddConvidadosInput struct {
 type AddConvidadosUseCase interface {
 	Execute(ctx context.Context, in AddConvidadosInput) error
 }
+
+// ---- Eventos advanced (CSE_014) inputs/use-cases ----
+
+// AlterarFaseInput holds the parameters for the fase transition use case.
+type AlterarFaseInput struct {
+	EventoID    string
+	RequesterID string
+	FaseDestino string
+}
+
+// AlterarFaseResult is the response payload for AlterarFaseUseCase.
+type AlterarFaseResult struct {
+	FaseAnterior string
+	FaseAtual    string
+	Mensagem     string
+}
+
+// AlterarFaseUseCase advances/rolls back the operational fase of an event.
+type AlterarFaseUseCase interface {
+	Execute(ctx context.Context, in AlterarFaseInput) (*AlterarFaseResult, error)
+}
+
+// UploadImagemInput represents a single image to be uploaded.
+type UploadImagemInput struct {
+	Filename    string
+	ContentType string
+	Size        int64
+	Data        []byte
+}
+
+// UploadImagensInput holds parameters for the upload-imagens use case.
+type UploadImagensInput struct {
+	EventoID    string
+	RequesterID string
+	Tipo        string // default 'galeria'; first image stored as 'capa'
+	Imagens     []UploadImagemInput
+}
+
+// UploadImagensUseCase uploads images to GridFS and appends them to the event.
+type UploadImagensUseCase interface {
+	Execute(ctx context.Context, in UploadImagensInput) (*event.Evento, error)
+}
+
+// EventoSummary is the lightweight projection returned by BuscarSummaries.
+type EventoSummary struct {
+	ID         string     `json:"id"`
+	Nome       string     `json:"nome"`
+	Tipo       string     `json:"tipo"`
+	DataInicio time.Time  `json:"dataInicio"`
+	DataFim    *time.Time `json:"dataFim,omitempty"`
+	Local      string     `json:"local"`
+	Descricao  string     `json:"descricao"`
+	Status     string     `json:"status"`
+	ImageURL   string     `json:"imageUrl,omitempty"`
+}
+
+// BuscarSummariesUseCase fetches lightweight summaries for a batch of event IDs.
+type BuscarSummariesUseCase interface {
+	Execute(ctx context.Context, ids []string) ([]EventoSummary, error)
+}
+
+// AtualizarPoliticaConvidadosInput holds parameters for updating politica.
+type AtualizarPoliticaConvidadosInput struct {
+	EventoID    string
+	RequesterID string
+	Politica    string
+}
+
+// AtualizarPoliticaConvidadosUseCase updates the event's politica de convidados.
+type AtualizarPoliticaConvidadosUseCase interface {
+	Execute(ctx context.Context, in AtualizarPoliticaConvidadosInput) (*event.Evento, error)
+}
+
+// EnderecoInput is the request-side address payload.
+type EnderecoInput struct {
+	Rua         *string
+	Numero      *string
+	Complemento *string
+	Bairro      *string
+	Cidade      *string
+	Estado      *string
+	Cep         *string
+	PlaceID     *string
+	Latitude    *float64
+	Longitude   *float64
+}
+
+// AtualizarDetalhesInput holds parameters for the partial update of evento details.
+type AtualizarDetalhesInput struct {
+	EventoID    string
+	RequesterID string
+	Nome        *string
+	Tipo        *string
+	Descricao   *string
+	Local       *string
+	DataInicio  *time.Time
+	DataFim     *time.Time
+	Endereco    *EnderecoInput
+}
+
+// AtualizarDetalhesUseCase updates editable detail fields of a published event.
+type AtualizarDetalhesUseCase interface {
+	Execute(ctx context.Context, in AtualizarDetalhesInput) (*event.Evento, error)
+}
+
+// ParticipantSummary aggregates participant counts for an event.
+type ParticipantSummary struct {
+	Total      int `json:"total"`
+	Confirmed  int `json:"confirmed"`
+	Pending    int `json:"pending"`
+	Declined   int `json:"declined"`
+}
+
+// GerenciarEventoResult is the dashboard view returned by GerenciarEventoUseCase.
+type GerenciarEventoResult struct {
+	EventoID              string             `json:"eventoId"`
+	NomeEvento            string             `json:"nomeEvento"`
+	Fase                  string             `json:"fase"`
+	PaymentReleaseTrigger string             `json:"paymentReleaseTrigger"`
+	RateiosHabilitado     bool               `json:"rateiosHabilitado"`
+	PagamentosHabilitado  bool               `json:"pagamentosHabilitado"`
+	ParticipantSummary    ParticipantSummary `json:"participantSummary"`
+	HasCompletedPayments  bool               `json:"hasCompletedPayments"`
+	WorkflowStatus        string             `json:"workflowStatus"`
+}
+
+// GerenciarEventoInput holds parameters for the dashboard query.
+type GerenciarEventoInput struct {
+	EventoID    string
+	RequesterID string
+}
+
+// GerenciarEventoUseCase returns the dashboard view for organizers.
+type GerenciarEventoUseCase interface {
+	Execute(ctx context.Context, in GerenciarEventoInput) (*GerenciarEventoResult, error)
+}
+
+// EventoPublicInfoResult is the no-auth public projection of an event.
+type EventoPublicInfoResult struct {
+	EventID            string     `json:"eventId"`
+	Nome               string     `json:"nome"`
+	Tipo               string     `json:"tipo"`
+	Descricao          string     `json:"descricao"`
+	Local              string     `json:"local"`
+	DataInicio         time.Time  `json:"dataInicio"`
+	DataFim            *time.Time `json:"dataFim,omitempty"`
+	OrganizadorNome    *string    `json:"organizadorNome,omitempty"`
+	PoliticaConvidados string     `json:"politicaConvidados"`
+	LimiteConvidados   *int       `json:"limiteConvidados,omitempty"`
+	TotalConfirmados   int64      `json:"totalConfirmados"`
+	ImagemCapa         string     `json:"imagemCapa,omitempty"`
+}
+
+// GetPublicInfoUseCase returns the public-info view for an event.
+type GetPublicInfoUseCase interface {
+	Execute(ctx context.Context, eventoID string) (*EventoPublicInfoResult, error)
+}
+
+// JoinEventoInput holds parameters for the join use case.
+type JoinEventoInput struct {
+	EventoID string
+	UserID   string
+}
+
+// JoinEventoResult tells the handler which HTTP status code to apply.
+type JoinEventoResult struct {
+	Status         string // CONFIRMADO | PENDENTE
+	ParticipantID  string
+	HTTPStatusCode int // 200 for public/CONFIRMADO; 202 for approval/PENDENTE
+}
+
+// JoinEventoUseCase processes a public join via shared link.
+type JoinEventoUseCase interface {
+	Execute(ctx context.Context, in JoinEventoInput) (*JoinEventoResult, error)
+}
+
+// EventoCompletoResult aggregates evento + participants + rateios + image list.
+type EventoCompletoResult struct {
+	ID                   string                  `json:"id"`
+	Nome                 string                  `json:"nome"`
+	Descricao            string                  `json:"descricao"`
+	Local                string                  `json:"local"`
+	DataInicio           time.Time               `json:"dataInicio"`
+	DataFim              *time.Time              `json:"dataFim,omitempty"`
+	Endereco             *event.EventoEndereco   `json:"endereco,omitempty"`
+	UsuarioIDResponsavel string                  `json:"usuarioIdResponsavel"`
+	Tipo                 string                  `json:"tipo"`
+	Status               string                  `json:"status"`
+	CriadoEm             time.Time               `json:"criadoEm"`
+	AtualizadoEm         time.Time               `json:"atualizadoEm"`
+	Imagens              []event.EventoImagem    `json:"imagens"`
+	Usuarios             []EventoParticipantInfo `json:"usuarios"`
+	ConvidadosExternos   []any                   `json:"convidadosExternos"`
+	Rateios              []EventoRateioInfo      `json:"rateios"`
+}
+
+// EventoParticipantInfo is a lightweight participant projection for completo.
+type EventoParticipantInfo struct {
+	ID      string `json:"id"`
+	UserID  string `json:"userId"`
+	Name    string `json:"name,omitempty"`
+	Email   string `json:"email,omitempty"`
+	Status  string `json:"status"`
+}
+
+// EventoRateioInfo is a lightweight rateio projection for completo.
+type EventoRateioInfo struct {
+	ID         string                  `json:"id"`
+	Descricao  string                  `json:"descricao"`
+	Tipo       string                  `json:"tipo"`
+	Status     string                  `json:"status"`
+	ValorTotal float64                 `json:"valorTotal"`
+	Itens      []EventoRateioItemInfo  `json:"itens"`
+}
+
+// EventoRateioItemInfo is a single rateio item projection.
+type EventoRateioItemInfo struct {
+	ID         string  `json:"id"`
+	Descricao  string  `json:"descricao"`
+	Valor      float64 `json:"valor"`
+	Quantidade int     `json:"quantidade"`
+	Total      float64 `json:"total"`
+}
+
+// GetEventoCompletoUseCase returns the aggregated detail view.
+type GetEventoCompletoUseCase interface {
+	Execute(ctx context.Context, eventoID string) (*EventoCompletoResult, error)
+}

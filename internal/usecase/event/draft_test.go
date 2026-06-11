@@ -97,6 +97,26 @@ func (m *mockEventoRepoForPublish) AddConvidados(ctx context.Context, eventoID s
 	return nil
 }
 
+func (m *mockEventoRepoForPublish) FindAllByIDs(ctx context.Context, ids []string) ([]domain.Evento, error) {
+	return nil, nil
+}
+
+func (m *mockEventoRepoForPublish) UpdateFase(ctx context.Context, id string, fase domain.EventoFase) error {
+	return nil
+}
+
+func (m *mockEventoRepoForPublish) UpdatePoliticaConvidados(ctx context.Context, id, politica string) error {
+	return nil
+}
+
+func (m *mockEventoRepoForPublish) AddImagens(ctx context.Context, id string, imagens []domain.EventoImagem) error {
+	return nil
+}
+
+func (m *mockEventoRepoForPublish) UpdateDetalhes(ctx context.Context, e *domain.Evento) (*domain.Evento, error) {
+	return nil, nil
+}
+
 // ---- helpers ----
 
 func sampleDraft(id, userID string) *domain.EventoDraft {

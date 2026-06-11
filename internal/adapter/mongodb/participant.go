@@ -281,6 +281,121 @@ func (r *ParticipanteMongoRepository) IsParticipantOfEvent(ctx context.Context, 
 	return count > 0, nil
 }
 
+// CountConfirmedByEventID returns the number of CONFIRMADO participants for an event.
+func (r *ParticipanteMongoRepository) CountConfirmedByEventID(ctx context.Context, eventID string) (int64, error) {
+	filter := bson.D{
+		{Key: "evento_id", Value: UUIDStringToBinary(eventID)},
+		{Key: "status", Value: "CONFIRMADO"},
+	}
+	count, err := r.col.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("count confirmed participants: %w", err)
+	}
+	return count, nil
+}
+
+// CountByEventIDAndStatus returns the number of participants matching the given status.
+func (r *ParticipanteMongoRepository) CountByEventIDAndStatus(ctx context.Context, eventID, status string) (int64, error) {
+	filter := bson.D{
+		{Key: "evento_id", Value: UUIDStringToBinary(eventID)},
+		{Key: "status", Value: status},
+	}
+	count, err := r.col.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("count participants by status: %w", err)
+	}
+	return count, nil
+}
+
+// CountNonOrganizadorByEventID counts participants whose papel is neither
+// ORGANIZADOR nor CO_ORGANIZADOR.
+func (r *ParticipanteMongoRepository) CountNonOrganizadorByEventID(ctx context.Context, eventID string) (int64, error) {
+	filter := bson.D{
+		{Key: "evento_id", Value: UUIDStringToBinary(eventID)},
+		{Key: "papel", Value: bson.D{{Key: "$nin", Value: bson.A{"ORGANIZADOR", "CO_ORGANIZADOR"}}}},
+	}
+	count, err := r.col.CountDocuments(ctx, filter)
+	if err != nil {
+		return 0, fmt.Errorf("count non-organizador participants: %w", err)
+	}
+	return count, nil
+}
+
+// HasOrganizadorPapel reports whether the user has ORGANIZADOR or CO_ORGANIZADOR papel.
+func (r *ParticipanteMongoRepository) HasOrganizadorPapel(ctx context.Context, eventID, userID string) (bool, error) {
+	filter := bson.D{
+		{Key: "evento_id", Value: UUIDStringToBinary(eventID)},
+		{Key: "usuario_id", Value: userIDValue(userID)},
+		{Key: "papel", Value: bson.D{{Key: "$in", Value: bson.A{"ORGANIZADOR", "CO_ORGANIZADOR"}}}},
+	}
+	count, err := r.col.CountDocuments(ctx, filter)
+	if err != nil {
+		return false, fmt.Errorf("has organizador papel: %w", err)
+	}
+	return count > 0, nil
+}
+
+// CreateParticipant inserts a new participant document and returns its ID.
+func (r *ParticipanteMongoRepository) CreateParticipant(ctx context.Context, p portout.NewParticipant) (string, error) {
+	newUUID := uuid.New()
+	b := [16]byte(newUUID)
+	docID := bson.Binary{Subtype: 0x04, Data: b[:]}
+	now := time.Now().UTC()
+
+	tipo := p.TipoParticipante
+	if tipo == "" {
+		tipo = "USER"
+	}
+	papel := p.Papel
+	if papel == "" {
+		papel = "CONVIDADO"
+	}
+	status := p.Status
+	if status == "" {
+		status = "PENDENTE"
+	}
+
+	doc := bson.D{
+		{Key: "_id", Value: docID},
+		{Key: "evento_id", Value: UUIDStringToBinary(p.EventID)},
+		{Key: "usuario_id", Value: userIDValue(p.UserID)},
+		{Key: "tipo_participante", Value: tipo},
+		{Key: "papel", Value: papel},
+		{Key: "status", Value: status},
+		{Key: "criado_em", Value: now},
+		{Key: "atualizado_em", Value: now},
+	}
+	if p.Nome != "" {
+		doc = append(doc, bson.E{Key: "nome", Value: p.Nome})
+	}
+	if p.Email != "" {
+		doc = append(doc, bson.E{Key: "email", Value: p.Email})
+	}
+	if _, err := r.col.InsertOne(ctx, doc); err != nil {
+		return "", fmt.Errorf("create participant: %w", err)
+	}
+	return newUUID.String(), nil
+}
+
+// FindAllByEventID returns the full participant list (no pagination).
+func (r *ParticipantMongoRepository) FindAllByEventID(ctx context.Context, eventID string) ([]domain.Participant, error) {
+	filter := bson.D{{Key: "evento_id", Value: UUIDStringToBinary(eventID)}}
+	cur, err := r.col.Find(ctx, filter)
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+	var result []domain.Participant
+	for cur.Next(ctx) {
+		var doc participantDocument
+		if err := cur.Decode(&doc); err != nil {
+			return nil, apierr.Internal(err.Error())
+		}
+		result = append(result, participantDocToDomain(doc))
+	}
+	return result, cur.Err()
+}
+
 // SaveOrganizador creates a participant document for the event creator with
 // papel=ORGANIZADOR and status=CONFIRMADO, matching Java's auto-registration behaviour.
 func (r *ParticipanteMongoRepository) SaveOrganizador(ctx context.Context, eventoID, usuarioID string) error {

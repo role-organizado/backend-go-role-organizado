@@ -47,6 +47,9 @@ type PaymentTransactionRepository interface {
 	// review (30-day lookback) and triple-reconciliation activities to compute real PSP
 	// cost / PSP net per event.
 	FindCompletedByEventID(ctx context.Context, eventID string, since time.Time) ([]*domain.PaymentTransaction, error)
+	// FindByEventID returns all transactions for the given event regardless of
+	// status. Used by alterarFase and gerenciar to detect COMPLETED payments.
+	FindByEventID(ctx context.Context, eventID string) ([]*domain.PaymentTransaction, error)
 }
 
 // PaymentInstallmentRepository is the persistence contract for PaymentInstallment.
