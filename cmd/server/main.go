@@ -466,14 +466,29 @@ func main() {
 		temporalRegistry.RegisterPaymentWorker(paymentActs)
 		temporalRegistry.RegisterReconciliationWorker(paymentActs)
 		temporalRegistry.RegisterSandboxWorker(temporalactivity.NewSandboxActivity())
-		temporalRegistry.RegisterFinanceReconciliationWorker(cfg.Server.JavaBackendURL)
+		// Native Go finance reconciliation (no HTTP delegation to Java).
+		financeSummaryRepoEarly := mongodb.NewFinanceSummaryRepository(mongoClient)
+		ledgerEntryRepoEarly := mongodb.NewLedgerEntryRepository(mongoClient)
+		financeReconReportRepo := mongodb.NewFinanceReconciliationReportRepository(mongoClient)
+		reconUC := ucfinance.NewReconciliationUseCase(
+			eventoRepo,
+			financeSummaryRepoEarly,
+			ledgerEntryRepoEarly,
+			txRepo,
+			financeReconReportRepo,
+		)
+		financeReconActs := temporalactivity.NewFinanceReconciliationActivities(reconUC)
+		temporalRegistry.RegisterFinanceReconciliationWorker(financeReconActs)
 
-		pspReviewUC := ucpricing.NewRunPspCostReview(cfg, &http.Client{Timeout: 5 * time.Minute})
+		// Native Go PSP cost review (no HTTP delegation to Java).
+		pspReviewReportRepo := mongodb.NewPspReviewReportRepository(mongoClient)
+		pspReviewUC := ucpricing.NewRunPspCostReview(configPagRepo, txRepo, pspReviewReportRepo)
 		pspReviewActivity := temporalactivity.NewPricingPspReviewActivity(pspReviewUC)
 		temporalRegistry.RegisterPricingPspReviewWorker(pspReviewActivity)
 
-		findMarkUC := ucpayment.NewFindAndMarkOverdueInstallments()
-		dispatchUC := ucnotification.NewDispatchOverdueNotifications()
+		// Native Go overdue installment marker + dispatcher (no HTTP delegation).
+		findMarkUC := ucpayment.NewFindAndMarkOverdueInstallments(installmentRepo)
+		dispatchUC := ucnotification.NewDispatchOverdueNotifications(findMarkUC, createNotifUC)
 		overdueActs := temporalactivity.NewOverdueInstallmentActivities(findMarkUC, dispatchUC)
 		temporalRegistry.RegisterOverdueInstallmentWorker(overdueActs)
 

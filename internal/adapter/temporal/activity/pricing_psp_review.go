@@ -20,16 +20,18 @@ func NewPricingPspReviewActivity(uc in.RunPspCostReviewUseCase) *PricingPspRevie
 	return &PricingPspReviewActivity{useCase: uc}
 }
 
-// RunPspCostReview executes the PSP cost review for the given reference date.
+// RunPspCostReview executes the PSP cost review for the given reference date
+// using the native Go use case (no HTTP delegation to the Java backend).
+//
 // It is registered in Temporal as the activity "RunPspCostReview".
 func (a *PricingPspReviewActivity) RunPspCostReview(ctx context.Context, referenceDate string) error {
 	logger := activity.GetLogger(ctx)
-	logger.Info("starting psp cost review activity", "referenceDate", referenceDate)
+	logger.Info("starting psp cost review activity (native)", "referenceDate", referenceDate)
 
 	if err := a.useCase.Execute(ctx, referenceDate); err != nil {
 		return fmt.Errorf("run psp cost review: %w", err)
 	}
 
-	logger.Info("psp cost review activity completed", "referenceDate", referenceDate)
+	logger.Info("psp cost review activity completed (native)", "referenceDate", referenceDate)
 	return nil
 }

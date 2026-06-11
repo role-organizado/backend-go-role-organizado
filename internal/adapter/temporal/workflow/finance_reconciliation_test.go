@@ -23,12 +23,18 @@ func TestFinanceReconciliation(t *testing.T) {
 	suite.Run(t, new(FinanceReconciliationTestSuite))
 }
 
+// stubReconciler is a no-op financeReconciler used to satisfy the constructor.
+// All real activity calls are intercepted by env.OnActivity mocks.
+type stubReconciler struct{}
+
+func (stubReconciler) Execute(_ context.Context, _ string) error { return nil }
+
 // newEnv creates a test environment with FinanceReconciliationActivities pre-registered.
 // Registration is required for OnActivity by string name to work.
-// The javaBackendURL is a dummy — all HTTP calls are intercepted by mocks.
+// A stub use case is injected — the workflow's activities are intercepted by mocks.
 func (s *FinanceReconciliationTestSuite) newEnv() *testsuite.TestWorkflowEnvironment {
 	env := s.NewTestWorkflowEnvironment()
-	acts := temporalactivity.NewFinanceReconciliationActivities("http://dummy-mocked")
+	acts := temporalactivity.NewFinanceReconciliationActivities(stubReconciler{})
 	env.RegisterActivity(acts)
 	env.RegisterWorkflow(workflow.FinanceReconciliationWorkflow)
 	return env

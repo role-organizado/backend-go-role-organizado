@@ -42,6 +42,11 @@ type PaymentTransactionRepository interface {
 	// FindPendingOlderThan returns PENDING/PROCESSING transactions created before
 	// threshold, used by expiration and reconciliation workflows.
 	FindPendingOlderThan(ctx context.Context, threshold time.Time) ([]*domain.PaymentTransaction, error)
+	// FindCompletedByEventID returns COMPLETED transactions for eventID whose completedAt
+	// (or createdAt fallback when completedAt is nil) is >= since. Used by the PSP cost
+	// review (30-day lookback) and triple-reconciliation activities to compute real PSP
+	// cost / PSP net per event.
+	FindCompletedByEventID(ctx context.Context, eventID string, since time.Time) ([]*domain.PaymentTransaction, error)
 }
 
 // PaymentInstallmentRepository is the persistence contract for PaymentInstallment.
@@ -66,6 +71,15 @@ type PaymentInstallmentRepository interface {
 	// CancelByParticipant cancels all non-terminal installments for a participant
 	// within an event. Returns the number of records updated.
 	CancelByParticipant(ctx context.Context, eventID, participantID string) (int64, error)
+	// FindOverdueNotNotified returns PENDING/PROCESSING installments whose due_date is
+	// strictly before referenceDate AND overdue_notification_sent is false. The combination
+	// of status filter and the overdue_notification_sent=false flag prevents re-processing
+	// installments already handled in a prior run (idempotency).
+	FindOverdueNotNotified(ctx context.Context, referenceDate time.Time) ([]*domain.PaymentInstallment, error)
+	// MarkOverdueBatch marks the given installment IDs as OVERDUE and flips their
+	// overdue_notification_sent flag to true atomically. Returns the number of
+	// documents actually updated.
+	MarkOverdueBatch(ctx context.Context, ids []string) (int64, error)
 }
 
 // PaymentAccountRepository is the persistence contract for PaymentAccount.

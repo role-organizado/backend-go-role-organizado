@@ -65,6 +65,13 @@ func (m *mockTxRepo) FindPendingOlderThan(ctx context.Context, threshold time.Ti
 	}
 	return args.Get(0).([]*domain.PaymentTransaction), args.Error(1)
 }
+func (m *mockTxRepo) FindCompletedByEventID(ctx context.Context, eventID string, since time.Time) ([]*domain.PaymentTransaction, error) {
+	args := m.Called(ctx, eventID, since)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.PaymentTransaction), args.Error(1)
+}
 
 // ─── Mock: AsaasCustomerLinkRepository ──────────────────────────────────────
 
