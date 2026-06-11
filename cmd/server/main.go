@@ -58,6 +58,8 @@ import (
 	ucsocial "github.com/role-organizado/backend-go-role-organizado/internal/usecase/social"
 	// Pricing — PSP cost review
 	ucpricing "github.com/role-organizado/backend-go-role-organizado/internal/usecase/pricing"
+	// Convites domain
+	ucconvite "github.com/role-organizado/backend-go-role-organizado/internal/usecase/convite"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -144,6 +146,10 @@ func main() {
 	}
 	if err := migrations.RunV085CreateSocialFeaturesIndexes(ctx, mongoClient.DB()); err != nil {
 		slog.Error("migration v085 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV086CreateConviteIndexes(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v086 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -420,7 +426,28 @@ func main() {
 		removeAlbumLinkUC,
 	)
 
-	// --- Phase 8: Temporal Worker (payment workflows) ---
+	// === CONVITES DOMAIN ===
+	// Repos shared with Java (participants, guests, approval_items, participant_credits,
+	// audit_entries, payment_installments, dominios). All UUIDs stored as Binary subtype 4.
+	conviteParticipantRepo := mongodb.NewConviteParticipantRepository(mongoClient)
+	conviteGuestRepo := mongodb.NewConviteGuestRepository(mongoClient)
+	conviteApprovalRepo := mongodb.NewConviteApprovalRepository(mongoClient)
+	conviteCreditRepo := mongodb.NewConviteParticipantCreditRepository(mongoClient)
+	conviteAuditRepo := mongodb.NewConviteAuditRepository(mongoClient)
+	convitePoliticaRepo := mongodb.NewConvitePoliticaRepository(mongoClient)
+	conviteInstallmentRepo := mongodb.NewConviteInstallmentRepository(mongoClient)
+	// TODO: replace with real SQS adapter when wired in cfg.SQS.Enabled.
+	conviteNotifPort := mongodb.NewNoopConviteNotificationAdapter()
+
+	// Use cases — buscar must be wired first because confirmar/recusar reuse it.
+	buscarConviteUC := ucconvite.NewBuscarConvite(
+		conviteParticipantRepo, conviteApprovalRepo, eventoRepo, usuarioRepo, conviteGuestRepo,
+	)
+	enviarConviteUC := ucconvite.NewEnviarConvite(
+		conviteParticipantRepo, conviteApprovalRepo, eventoRepo, usuarioRepo, conviteNotifPort,
+	)
+	reabrirInviteUC := ucconvite.NewReabrirInviteApproval(conviteParticipantRepo, conviteApprovalRepo)
+	reenviarMassaUC := ucconvite.NewReenviarConvitesMassaAdmin(eventoRepo, conviteAuditRepo)
 	// Enabled via TEMPORAL_WORKER_ENABLED=true (default: false during Strangler Fig migration).
 	// When disabled, no-op starters/signalers are used so the payment use cases compile and
 	// run correctly without a live Temporal cluster.
@@ -494,6 +521,21 @@ func main() {
 	handlePaymentCallbackUC.
 		WithTemporalSignaler(temporalSignaler).
 		WithTemporalStarter(temporalStarter)
+
+	// === CONVITES DOMAIN — temporal-dependent UCs + handler ===
+	confirmarConviteUC := ucconvite.NewConfirmarConvite(
+		conviteParticipantRepo, conviteApprovalRepo, buscarConviteUC, temporalStarter,
+	)
+	recusarConviteUC := ucconvite.NewRecusarConvite(
+		conviteParticipantRepo, conviteApprovalRepo, buscarConviteUC, temporalStarter,
+	)
+	desistirEventoUC := ucconvite.NewDesistirEvento(
+		conviteParticipantRepo, eventoRepo, convitePoliticaRepo, conviteInstallmentRepo, conviteCreditRepo, temporalStarter,
+	)
+	conviteHandler := handler.NewConviteHandler(
+		buscarConviteUC, enviarConviteUC, confirmarConviteUC, recusarConviteUC,
+		desistirEventoUC, reabrirInviteUC, reenviarMassaUC,
+	)
 
 	// --- Phase 8b: Temporal Workflow Proxies (Java fallback) ---
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
@@ -577,6 +619,7 @@ func main() {
 	configHandler.RegisterRoutes(r)          // GET /api/v1/dominios (public read) + admin write
 	cardapioHandler.RegisterCardapioRoutes(r) // GET /api/cardapios (public — Java parity)
 	paymentWebhookHandler.RegisterWebhookRoutes(r) // POST /api/v1/webhooks/payment/asaas (no JWT)
+	conviteHandler.RegisterPublicConviteRoutes(r)  // GET /{id}, /registration-data, POST /confirmar, /recusar
 
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {
@@ -601,6 +644,7 @@ func main() {
 		usuariosEventoHandler.RegisterUsuariosEventoRoutes(r)
 		approvalsHandler.RegisterApprovalsRoutes(r)
 		outboundRequestHandler.RegisterOutboundRequestRoutes(r)
+		conviteHandler.RegisterProtectedConviteRoutes(r)
 	})
 
 	// --- HTTP server ---
