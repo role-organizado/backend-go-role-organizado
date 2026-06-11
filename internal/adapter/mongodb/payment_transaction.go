@@ -261,6 +261,45 @@ func (r *PaymentTransactionRepository) FindPendingOlderThan(ctx context.Context,
 	return results, nil
 }
 
+// FindCompletedByEventID returns COMPLETED transactions whose completedAt OR createdAt
+// (fallback when completedAt is nil) is >= since. The OR semantics on completedAt|createdAt
+// mirror the Java PricingPspReviewService 30-day lookback rule.
+func (r *PaymentTransactionRepository) FindCompletedByEventID(ctx context.Context, eventID string, since time.Time) ([]*domain.PaymentTransaction, error) {
+	filter := bson.D{
+		{Key: "eventId", Value: eventID},
+		{Key: "status", Value: string(domain.TransactionStatusCompleted)},
+		{Key: "$or", Value: bson.A{
+			bson.D{{Key: "completedAt", Value: bson.D{{Key: "$gte", Value: since}}}},
+			bson.D{
+				{Key: "completedAt", Value: nil},
+				{Key: "createdAt", Value: bson.D{{Key: "$gte", Value: since}}},
+			},
+		}},
+	}
+	cursor, err := r.col.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}))
+	if err != nil {
+		return nil, apierr.Internal(fmt.Sprintf("find completed transactions by event: %s", err.Error()))
+	}
+	defer cursor.Close(ctx)
+
+	var results []*domain.PaymentTransaction
+	for cursor.Next(ctx) {
+		var doc paymentTransactionDocument
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, apierr.Internal(fmt.Sprintf("decode completed transaction: %s", err.Error()))
+		}
+		tx := paymentTxFromDoc(doc)
+		results = append(results, &tx)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, apierr.Internal(fmt.Sprintf("cursor completed transactions: %s", err.Error()))
+	}
+	if results == nil {
+		results = []*domain.PaymentTransaction{}
+	}
+	return results, nil
+}
+
 // ---- mapping helpers ----
 
 func paymentTxToDoc(tx *domain.PaymentTransaction) paymentTransactionDocument {

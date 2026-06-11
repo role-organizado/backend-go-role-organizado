@@ -164,6 +164,48 @@ func (r *PaymentInstallmentRepository) CancelByParticipant(ctx context.Context, 
 	return result.ModifiedCount, nil
 }
 
+// FindOverdueNotNotified returns installments whose due_date is strictly before
+// referenceDate, whose status is PENDING or PROCESSING, and whose
+// overdue_notification_sent flag is false. The status + flag combination prevents
+// re-processing in subsequent runs (idempotency).
+func (r *PaymentInstallmentRepository) FindOverdueNotNotified(ctx context.Context, referenceDate time.Time) ([]*domain.PaymentInstallment, error) {
+	filter := bson.D{
+		{Key: "status", Value: bson.D{{Key: "$in", Value: bson.A{
+			string(domain.InstallmentStatusPending),
+			string(domain.InstallmentStatusProcessing),
+		}}}},
+		{Key: "due_date", Value: bson.D{{Key: "$lt", Value: referenceDate}}},
+		{Key: "overdue_notification_sent", Value: false},
+	}
+	cursor, err := r.col.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "due_date", Value: 1}}))
+	if err != nil {
+		return nil, apierr.Internal(fmt.Sprintf("find overdue not-notified installments: %s", err.Error()))
+	}
+	return installmentCursorToSlice(ctx, cursor)
+}
+
+// MarkOverdueBatch atomically transitions a set of installments to OVERDUE and
+// flips overdue_notification_sent to true so future runs skip them. Returns the
+// number of matched & modified documents.
+func (r *PaymentInstallmentRepository) MarkOverdueBatch(ctx context.Context, ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	now := time.Now()
+	res, err := r.col.UpdateMany(ctx,
+		bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}},
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "status", Value: string(domain.InstallmentStatusOverdue)},
+			{Key: "overdue_notification_sent", Value: true},
+			{Key: "updated_at", Value: now},
+		}}},
+	)
+	if err != nil {
+		return 0, apierr.Internal(fmt.Sprintf("mark overdue batch: %s", err.Error()))
+	}
+	return res.ModifiedCount, nil
+}
+
 // Save persists a new installment. ID is generated if empty.
 func (r *PaymentInstallmentRepository) Save(ctx context.Context, inst *domain.PaymentInstallment) error {
 	if inst.ID == "" {

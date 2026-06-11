@@ -76,6 +76,19 @@ func (m *mockInstallmentRepo) Save(ctx context.Context, inst *domain.PaymentInst
 	return args.Error(0)
 }
 
+func (m *mockInstallmentRepo) FindOverdueNotNotified(ctx context.Context, referenceDate time.Time) ([]*domain.PaymentInstallment, error) {
+	args := m.Called(ctx, referenceDate)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.PaymentInstallment), args.Error(1)
+}
+
+func (m *mockInstallmentRepo) MarkOverdueBatch(ctx context.Context, ids []string) (int64, error) {
+	args := m.Called(ctx, ids)
+	return args.Get(0).(int64), args.Error(1)
+}
+
 // ─── Mock: ParticipanteRepository ────────────────────────────────────────────
 
 type mockInstParticipanteRepo struct{ mock.Mock }
