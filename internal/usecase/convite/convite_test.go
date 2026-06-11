@@ -132,6 +132,19 @@ func (s *stubEventoRepo) DeleteByID(_ context.Context, _ string) error { return 
 func (s *stubEventoRepo) AddConvidados(_ context.Context, _ string, _ []domainevent.Convidado) error {
 	return nil
 }
+func (s *stubEventoRepo) FindAllByIDs(_ context.Context, _ []string) ([]domainevent.Evento, error) {
+	return nil, nil
+}
+func (s *stubEventoRepo) UpdateFase(_ context.Context, _ string, _ domainevent.EventoFase) error {
+	return nil
+}
+func (s *stubEventoRepo) UpdatePoliticaConvidados(_ context.Context, _, _ string) error { return nil }
+func (s *stubEventoRepo) AddImagens(_ context.Context, _ string, _ []domainevent.EventoImagem) error {
+	return nil
+}
+func (s *stubEventoRepo) UpdateDetalhes(_ context.Context, e *domainevent.Evento) (*domainevent.Evento, error) {
+	return e, nil
+}
 
 type stubUsuarioRepo struct {
 	byID map[string]*authdomain.Usuario

@@ -196,6 +196,21 @@ func (f *fakeEventoRepo) Update(ctx context.Context, e *eventdomain.Evento) (*ev
 }
 func (f *fakeEventoRepo) DeleteByID(ctx context.Context, id string) error                          { return nil }
 func (f *fakeEventoRepo) AddConvidados(ctx context.Context, id string, c []eventdomain.Convidado) error { return nil }
+func (f *fakeEventoRepo) FindAllByIDs(ctx context.Context, ids []string) ([]eventdomain.Evento, error) {
+	return nil, nil
+}
+func (f *fakeEventoRepo) UpdateFase(ctx context.Context, id string, fase eventdomain.EventoFase) error {
+	return nil
+}
+func (f *fakeEventoRepo) UpdatePoliticaConvidados(ctx context.Context, id, politica string) error {
+	return nil
+}
+func (f *fakeEventoRepo) AddImagens(ctx context.Context, id string, imagens []eventdomain.EventoImagem) error {
+	return nil
+}
+func (f *fakeEventoRepo) UpdateDetalhes(ctx context.Context, e *eventdomain.Evento) (*eventdomain.Evento, error) {
+	return e, nil
+}
 
 // ── participant fake ──
 
@@ -218,6 +233,10 @@ func (f *fakeParticipantRepo) FindByEventIDAndUserID(ctx context.Context, eventI
 		return p, nil
 	}
 	return nil, apierr.NotFound("participant", userID)
+}
+
+func (f *fakeParticipantRepo) FindAllByEventID(ctx context.Context, eventID string) ([]financedomain.Participant, error) {
+	return f.byEvent[eventID], nil
 }
 
 // ── finance summary fake ──

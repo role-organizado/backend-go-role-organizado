@@ -57,6 +57,13 @@ func (m *mockPaymentTxRepo) FindByEventID(ctx context.Context, eventID string) (
 	}
 	return a.Get(0).([]*paymentdomain.PaymentTransaction), a.Error(1)
 }
+func (m *mockPaymentTxRepo) FindCompletedByEventID(ctx context.Context, eventID string, since time.Time) ([]*paymentdomain.PaymentTransaction, error) {
+	a := m.Called(ctx, eventID, since)
+	if a.Get(0) == nil {
+		return nil, a.Error(1)
+	}
+	return a.Get(0).([]*paymentdomain.PaymentTransaction), a.Error(1)
+}
 
 // mockParticipantReadRepo implements portout.ParticipantRepository (read-side).
 type mockParticipantReadRepo struct{ mock.Mock }
