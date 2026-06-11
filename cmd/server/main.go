@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,6 +59,8 @@ import (
 	ucsocial "github.com/role-organizado/backend-go-role-organizado/internal/usecase/social"
 	// Pricing — PSP cost review
 	ucpricing "github.com/role-organizado/backend-go-role-organizado/internal/usecase/pricing"
+	// Outbound Transfers (withdrawals + voting approval)
+	ucoutbound "github.com/role-organizado/backend-go-role-organizado/internal/usecase/outbound"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -144,6 +147,10 @@ func main() {
 	}
 	if err := migrations.RunV085CreateSocialFeaturesIndexes(ctx, mongoClient.DB()); err != nil {
 		slog.Error("migration v085 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV086CreateOutboundIndexes(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v086 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -540,7 +547,50 @@ func main() {
 
 	// --- Misc handlers (Bloco 3d parity) ---
 	cardapioHandler := handler.NewCardapioHandler(mongoClient)
-	outboundRequestHandler := handler.NewOutboundRequestHandler(mongoClient)
+
+	// === OUTBOUND DOMAIN ===
+	// Outbound Transfers (organizer withdrawals + voting approval) — Java parity.
+	// Provider is chosen via ROLE_OUTBOUND_PROVIDER: "asaas" (real) or "noop" (default).
+	outboundRequestRepo := mongodb.NewOutboundRequestRepository(mongoClient)
+	outboundAuditLogRepo := mongodb.NewOutboundAuditLogRepository(mongoClient)
+
+	var outboundTransferProvider portout.OutboundTransferProvider
+	switch strings.ToLower(os.Getenv("ROLE_OUTBOUND_PROVIDER")) {
+	case "asaas":
+		outboundTransferProvider = ucasaas.NewOutboundTransferClient(cfg.Asaas)
+	default:
+		outboundTransferProvider = ucasaas.NewNoopOutboundTransferProvider()
+	}
+
+	createOutboundUC := ucoutbound.NewCreateOutboundRequest(
+		outboundRequestRepo, eventoRepo, participantRepo,
+		financeSummaryRepo, paymentAccountRepo,
+		outboundTransferProvider, outboundAuditLogRepo,
+	)
+	listOutboundUC := ucoutbound.NewListOutboundRequests(outboundRequestRepo, eventoRepo, participantRepo)
+	getOutboundUC := ucoutbound.NewGetOutboundRequest(outboundRequestRepo, eventoRepo, participantRepo)
+	getOutboundDetailsUC := ucoutbound.NewGetOutboundRequestDetails(outboundRequestRepo, eventoRepo, participantRepo)
+	approveOutboundUC := ucoutbound.NewApproveOutboundRequest(
+		outboundRequestRepo, eventoRepo, participantRepo,
+		outboundTransferProvider, outboundAuditLogRepo,
+	)
+	rejectOutboundUC := ucoutbound.NewRejectOutboundRequest(
+		outboundRequestRepo, eventoRepo, participantRepo, outboundAuditLogRepo,
+	)
+	cancelOutboundUC := ucoutbound.NewCancelOutboundRequest(outboundRequestRepo, outboundAuditLogRepo)
+	voteOutboundUC := ucoutbound.NewVoteOnOutboundRequest(
+		outboundRequestRepo, eventoRepo, participantRepo,
+		outboundTransferProvider, outboundAuditLogRepo,
+	)
+	handleOutboundCallbackUC := ucoutbound.NewHandleOutboundTransferCallback(outboundRequestRepo, outboundAuditLogRepo)
+
+	outboundRequestHandler := handler.NewOutboundRequestHandler(
+		createOutboundUC, listOutboundUC, getOutboundUC, getOutboundDetailsUC,
+		approveOutboundUC, rejectOutboundUC, cancelOutboundUC, voteOutboundUC,
+	)
+	outboundWebhookHandler := handler.NewOutboundWebhookHandler(
+		handleOutboundCallbackUC, webhookRepo, cfg.Asaas.WebhookToken,
+	)
 
 	// --- Phase 9: Temporal Workers ---
 	temporalClient, err := temporaladapter.NewClient(cfg.Temporal)
@@ -577,6 +627,7 @@ func main() {
 	configHandler.RegisterRoutes(r)          // GET /api/v1/dominios (public read) + admin write
 	cardapioHandler.RegisterCardapioRoutes(r) // GET /api/cardapios (public — Java parity)
 	paymentWebhookHandler.RegisterWebhookRoutes(r) // POST /api/v1/webhooks/payment/asaas (no JWT)
+	outboundWebhookHandler.RegisterOutboundWebhookRoutes(r) // POST /api/v1/webhooks/outbound/asaas (no JWT)
 
 	// --- Protected routes (JWT required) ---
 	r.Group(func(r chi.Router) {
