@@ -150,8 +150,10 @@ func NewSlogHandler(lp *sdklog.LoggerProvider) goslog.Handler {
 func newResource(cfg Config) (*resource.Resource, error) {
 	return resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+		// NewSchemaless (no schema URL) avoids a "conflicting Schema URL" error
+		// when merging with resource.Default(), whose schema URL tracks the SDK
+		// version (1.41.0) and differs from our semconv import (1.26.0).
+		resource.NewSchemaless(
 			semconv.ServiceName(cfg.ServiceName),
 			semconv.ServiceVersion(cfg.ServiceVersion),
 			semconv.DeploymentEnvironment(cfg.Environment),
