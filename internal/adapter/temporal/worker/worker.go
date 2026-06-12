@@ -103,3 +103,55 @@ func (r *Registry) RegisterPspReconciliationWorker(acts *temporalactivity.PspRec
 	w.RegisterWorkflow(temporalworkflow.PspReconciliationWorkflow)
 	w.RegisterActivity(acts)
 }
+
+// ─── Onda 3/4 native workflow workers ──────────────────────────────────────────
+
+// RegisterParticipantLifecycleWorker registers the ParticipantLifecycleWorkflow
+// and its activities on PARTICIPANT_LIFECYCLE_QUEUE.
+func (r *Registry) RegisterParticipantLifecycleWorker(acts *temporalactivity.ParticipantLifecycleActivities) {
+	w := r.NewWorker(temporalworkflow.ParticipantLifecycleTaskQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.ParticipantLifecycleWorkflow)
+	w.RegisterActivity(acts)
+}
+
+// RegisterInviteLifecycleWorker registers the InviteLifecycleWorkflow and its
+// activities on INVITE_LIFECYCLE_QUEUE.
+func (r *Registry) RegisterInviteLifecycleWorker(acts *temporalactivity.InviteLifecycleActivities) {
+	w := r.NewWorker(temporalworkflow.InviteLifecycleTaskQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.InviteLifecycleWorkflow)
+	w.RegisterActivity(acts)
+}
+
+// RegisterOutboundExecutionWorker registers the OutboundExecutionWorkflow and its
+// activities on OUTBOUND_EXECUTION_QUEUE.
+func (r *Registry) RegisterOutboundExecutionWorker(acts *temporalactivity.OutboundExecutionActivities) {
+	w := r.NewWorker(temporalworkflow.OutboundExecutionTaskQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.OutboundExecutionWorkflow)
+	w.RegisterActivity(acts)
+}
+
+// RegisterEventLifecycleWorker registers the EventLifecycleWorkflow and its
+// activities on EVENT_LIFECYCLE_QUEUE.
+func (r *Registry) RegisterEventLifecycleWorker(acts *temporalactivity.EventLifecycleActivities) {
+	w := r.NewWorker(temporalworkflow.EventLifecycleTaskQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.EventLifecycleWorkflow)
+	w.RegisterActivity(acts)
+}
+
+// RegisterEventPublicationMonitoringWorker registers the
+// EventPublicationMonitoringWorkflow and its activities on
+// EVENT_PUBLICATION_MONITORING_QUEUE.
+func (r *Registry) RegisterEventPublicationMonitoringWorker(acts *temporalactivity.EventPublicationMonitoringActivities) {
+	w := r.NewWorker(temporalworkflow.EventPublicationMonitoringTaskQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.EventPublicationMonitoringWorkflow)
+	w.RegisterActivity(acts)
+}
+
+// RegisterEventPublicationExecutionWorker registers the
+// EventPublicationExecutionWorkflow and its activities on
+// EVENT_PUBLICATION_EXECUTION_QUEUE.
+func (r *Registry) RegisterEventPublicationExecutionWorker(acts *temporalactivity.EventPublicationExecutionActivities) {
+	w := r.NewWorker(temporalworkflow.EventPublicationExecutionTaskQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.EventPublicationExecutionWorkflow)
+	w.RegisterActivity(acts)
+}
