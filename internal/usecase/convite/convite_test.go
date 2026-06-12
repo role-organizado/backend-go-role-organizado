@@ -194,14 +194,6 @@ func (s *stubCreditRepo) Save(_ context.Context, c portout.ParticipantCredit) (s
 	return s.id, nil
 }
 
-type stubPoliticaRepo struct {
-	policy *convitedomain.CancellationPolicy
-}
-
-func (s *stubPoliticaRepo) FindByChave(_ context.Context, _ string) (*convitedomain.CancellationPolicy, error) {
-	return s.policy, nil
-}
-
 type stubInstallmentRepo struct {
 	items     []portout.ConviteInstallment
 	cancelled int64

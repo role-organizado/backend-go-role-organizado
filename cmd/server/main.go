@@ -103,7 +103,7 @@ func main() {
 	// Sempre wrappear com TraceContextHandler para injetar trace_id/span_id no JSON stdout.
 	// Quando OTel está habilitado, o TeeHandler encaminha também para o LoggerProvider.
 	tracedJSON := pkgotel.NewTraceContextHandler(jsonHandler)
-	var logHandler slog.Handler = tracedJSON
+	logHandler := tracedJSON
 
 	ctx := context.Background()
 

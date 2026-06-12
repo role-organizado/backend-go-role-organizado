@@ -55,7 +55,6 @@ type fakeEventoRepo struct {
 	total   int64
 	byID    map[string]*event.Evento
 	updated *event.Evento
-	pending map[string][]outbound.OutboundRequest
 }
 
 func (f *fakeEventoRepo) FindAll(_ context.Context, _, _ int) ([]event.Evento, int64, error) {

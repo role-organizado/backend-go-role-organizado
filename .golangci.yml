@@ -1,0 +1,10 @@
+# golangci-lint v2 configuration.
+# Restores the standard error-handling exclusions that golangci-lint v1
+# applied by default (exclude-use-default: true → EXC0001), so common
+# idioms like `defer x.Close()` and `fmt.Fprint(...)` are not flagged.
+version: "2"
+
+linters:
+  exclusions:
+    presets:
+      - std-error-handling
