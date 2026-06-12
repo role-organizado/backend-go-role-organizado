@@ -3,6 +3,7 @@ package in
 import (
 	"context"
 
+	notification "github.com/role-organizado/backend-go-role-organizado/internal/domain/notification"
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/notificationtemplate"
 )
 
@@ -83,4 +84,93 @@ type GetByTypeNotificationTemplateUseCase interface {
 // ListByCategoriaNotificationTemplateUseCase lists templates filtered by TemplateCategoria.
 type ListByCategoriaNotificationTemplateUseCase interface {
 	Execute(ctx context.Context, categoria domain.TemplateCategoria, page, pageSize int) ([]domain.NotificationTemplate, int64, error)
+}
+
+// ============================================================================
+// Notification Stages — input ports
+// ============================================================================
+
+// UpsertNotificationStageInput is the request body for creating/replacing a stage.
+type UpsertNotificationStageInput struct {
+	Locale        string
+	EventType     string
+	SuccessPolicy notification.NotificationStageSuccessPolicy
+	Levels        []NotificationStageLevelInput
+}
+
+// NotificationStageLevelInput is one escalation level of an upsert request.
+type NotificationStageLevelInput struct {
+	Order     int
+	Templates []NotificationStageTemplateInput
+}
+
+// NotificationStageTemplateInput is one channel template within a level.
+type NotificationStageTemplateInput struct {
+	Canal     notification.NotificationChannel
+	Nome      string
+	Assunto   string
+	Corpo     string
+	Variaveis []string
+	Metadados map[string]any
+	Ativo     *bool
+}
+
+// TestSendStagesInput drives the multi-stage test-send orchestrator.
+type TestSendStagesInput struct {
+	StageKey     string
+	EventType    string
+	Destinatario string
+	Variaveis    map[string]string
+}
+
+// StageChannelResult is the per-channel outcome of a test send within a level.
+type StageChannelResult struct {
+	Canal   notification.NotificationChannel `json:"canal"`
+	Assunto string                           `json:"assunto,omitempty"`
+	Corpo   string                           `json:"corpo"`
+	Enviado bool                             `json:"enviado"`
+}
+
+// StageLevelResult is the outcome of one escalation level.
+type StageLevelResult struct {
+	Order    int                  `json:"order"`
+	Canais   []StageChannelResult `json:"canais"`
+	Sucesso  bool                 `json:"sucesso"`
+	Parou    bool                 `json:"parou"` // true when escalation stopped at this level
+}
+
+// TestSendStagesResult is the aggregated outcome of the orchestrator.
+type TestSendStagesResult struct {
+	Key             string                                      `json:"key"`
+	ResolvedEvent   string                                      `json:"resolvedEventType"`
+	SuccessPolicy   notification.NotificationStageSuccessPolicy `json:"successPolicy"`
+	Destinatario    string                                      `json:"destinatario"`
+	Niveis          []StageLevelResult                          `json:"niveis"`
+	Sucesso         bool                                        `json:"sucesso"`
+	TotalEnviados   int                                         `json:"totalEnviados"`
+}
+
+// ListNotificationStagesUseCase lists stages, optionally filtered by eventType.
+type ListNotificationStagesUseCase interface {
+	Execute(ctx context.Context, eventType string) ([]notification.NotificationStageConfig, error)
+}
+
+// GetNotificationStageUseCase fetches a single stage by key (+ optional eventType).
+type GetNotificationStageUseCase interface {
+	Execute(ctx context.Context, stageKey, eventType string) (*notification.NotificationStageConfig, error)
+}
+
+// UpsertNotificationStageUseCase replaces a stage's templates atomically.
+type UpsertNotificationStageUseCase interface {
+	Execute(ctx context.Context, stageKey string, in UpsertNotificationStageInput) (*notification.NotificationStageConfig, error)
+}
+
+// DeleteNotificationStageUseCase removes a stage (all its template rows).
+type DeleteNotificationStageUseCase interface {
+	Execute(ctx context.Context, stageKey, eventType string) error
+}
+
+// TestSendStagesUseCase renders and simulates the multi-level escalation send.
+type TestSendStagesUseCase interface {
+	Execute(ctx context.Context, in TestSendStagesInput) (*TestSendStagesResult, error)
 }

@@ -102,6 +102,31 @@ GET http://localhost:8090/actuator/health
 | 12   | ✅     | Strangler Fig BFF Routing (per-domain flags, zero impacto prod) |
 | 13   | ✅     | Java Decommission (documentado, plano de cutover pronto)        |
 
+## Status Matriz de Domínios (Round 3 / Trilha D — 2026-06-11)
+
+Visão por domínio dos use cases migrados para Go e seus endpoints HTTP. Counts
+aproximados (arquivos de use case × handlers registrados em `cmd/server/main.go`).
+
+| Phase | Domínio              | UC Count | Endpoint Count | Status |
+| ----- | -------------------- | -------- | -------------- | ------ |
+| 2     | Identity & Auth      | 7        | 14             | ✅ done |
+| 2     | Guests               | 7        | 8              | ✅ done |
+| 2     | Biometric Auth       | 6        | 6              | ✅ done |
+| 3     | Eventos (+ advanced) | 8        | 30+            | ✅ done |
+| 3     | Convites             | 7        | 12             | ✅ done |
+| 5     | Payments             | 19       | 20+            | ✅ done |
+| 5b    | Finance / Outbound   | 10       | 9              | ✅ done |
+| 6     | Notifications        | 3        | 7              | ✅ done |
+| 6b    | Notification Templates + Stages | 14 | 16        | ✅ done |
+| 8     | Temporal-native Workflows | 6+  | n/a            | ✅ done |
+| 12    | Backfill / Migrations | n/a     | n/a            | ✅ done |
+
+Notas Trilha D:
+- **Notification Stages**: `GerenciarNotificationStages` (Listar/Buscar/Upsert/Excluir + `TestSendStages` orquestrador multi-estágio) sob `/api/v1/notification-templates/stages` — chaves `STAGE__<KEY>__<EVENT>__<CHANNEL>__L<N>`.
+- **Guests**: `VincularGuestAUsuario` (modos implícito por telefone/email e explícito por participantId) acoplado aos fluxos `/register` e OAuth callback.
+- **Convites**: publisher SQS real (`internal/adapter/sqs`) ativado por `ROLE_SQS_ENABLED`, com fallback no-op.
+- **Outbound**: `ApproveOutboundRequest` inicia o `OutboundExecutionWorkflow` (Temporal) quando o starter está conectado.
+
 ## Ativando Tráfego por Domínio (Cutover)
 
 No BFF, ativar via env var:

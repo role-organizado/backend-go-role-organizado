@@ -3,8 +3,31 @@ package out
 import (
 	"context"
 
+	convitedomain "github.com/role-organizado/backend-go-role-organizado/internal/domain/convite"
 	"github.com/role-organizado/backend-go-role-organizado/internal/domain/guest"
 )
+
+// VinculacaoParticipantPort exposes the narrow participant operations needed to
+// migrate participations from GUEST to USER when a guest evolves into a user.
+// Optional — a nil implementation disables participant migration (counts stay 0).
+type VinculacaoParticipantPort interface {
+	// FindByID locates a participant by its UUID id (explicit invite-link mode).
+	FindByID(ctx context.Context, id string) (*convitedomain.Participant, error)
+	// FindByTipoParticipanteAndUsuarioID returns participants whose tipo + usuarioId
+	// match — used to find GUEST participations carrying the guestId as usuarioId.
+	FindByTipoParticipanteAndUsuarioID(ctx context.Context, tipo convitedomain.TipoParticipante, usuarioID string) ([]convitedomain.Participant, error)
+	// Save persists participant mutations (tipo, usuarioId, timestamps).
+	Save(ctx context.Context, p *convitedomain.Participant) (*convitedomain.Participant, error)
+}
+
+// VinculacaoDraftPort exposes the narrow draft operations needed to rewrite
+// guestId references to the new userId across event drafts. Optional (nil-safe).
+type VinculacaoDraftPort interface {
+	// FindDraftIDsByConvidadosGuestID returns the ids of drafts referencing guestID.
+	FindDraftIDsByConvidadosGuestID(ctx context.Context, guestID string) ([]string, error)
+	// ConvertGuestToUserInConvidados rewrites guestID → userID in the draft's guest list.
+	ConvertGuestToUserInConvidados(ctx context.Context, draftID, guestID, userID string) error
+}
 
 // GuestRepository is the output port for Guest persistence (collection: guests).
 type GuestRepository interface {

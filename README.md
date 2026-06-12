@@ -82,3 +82,24 @@ go mod tidy
 | 11   | Java decommission                        | 🔜      |
 
 Spec completa: `role-organizado-workspace/specs/155-backend-go-migration/plan.md`
+
+## Status Matriz Domains
+
+Domínios migrados para Go e seus principais use cases (atualizado em 2026-06-11, Round 3 / Trilha D).
+
+| Domínio                  | Use Cases (principais)                                                                                       | Status  |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------- | ------- |
+| Auth                     | Login, Register, Refresh, Validate, Logout, GoogleAuth, AppleAuth                                            | ✅ Done |
+| Guests                   | CreateOrFind, Get, GetByTelefone, GetByEmail, List, BatchGet, **VincularGuestAUsuario**                      | ✅ Done |
+| Biometric                | GenerateChallenge, Authenticate, RegisterCredential, ListDevices, RevokeDevice, CheckStatus                 | ✅ Done |
+| Eventos                  | Create/Get/List/Update draft + wizard + advanced (participantes, regras)                                     | ✅ Done |
+| Convites                 | BuscarConvite, EnviarConvite (**SQS real**), Confirmar, Recusar, Desistir, ReabrirInvite, ReenviarMassaAdmin | ✅ Done |
+| Payments                 | ProcessPayment, HandleCallback, Installments, PIX/Boleto/Card, ProcessBatch (19 UCs)                        | ✅ Done |
+| Finance / Outbound       | Create/Approve/Reject/Cancel/Vote/Details/Get/List/HandleCallback (**Approve→Temporal**)                    | ✅ Done |
+| Notifications            | List, Get, Create, MarcarLida, MarcarTodas, Delete, CountUnread                                             | ✅ Done |
+| Notification Templates   | Create/Get/List/Update/Delete/Render/TestSend/GetByType/ListByCategoria                                      | ✅ Done |
+| Notification **Stages**  | **Listar/Buscar/Upsert/Excluir + TestSendStages** (orquestrador multi-estágio)                              | ✅ Done |
+| Rateio / Cofrinho        | Cálculo e fechamento de rateios, cofrinho                                                                    | ✅ Done |
+| Social                   | Amizades, feed e interações (14 UCs)                                                                         | ✅ Done |
+| Temporal-native          | Payment/Reconciliation/Overdue/Pricing/Finance workflows + Outbound execution                               | ✅ Done |
+| Backfill / Migrations    | Migrações MongoDB (`_migrations_go`)                                                                         | ✅ Done |

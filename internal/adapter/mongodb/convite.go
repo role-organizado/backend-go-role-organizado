@@ -123,6 +123,30 @@ func (r *ConviteParticipantMongoRepository) FindByEventoIDAndPapel(ctx context.C
 	return out, cur.Err()
 }
 
+// FindByTipoParticipanteAndUsuarioID returns participants matching a tipo and a
+// usuario_id. Used by the guest-linking use case to find GUEST participations
+// that still carry the guestId as usuario_id.
+func (r *ConviteParticipantMongoRepository) FindByTipoParticipanteAndUsuarioID(ctx context.Context, tipo convitedomain.TipoParticipante, usuarioID string) ([]convitedomain.Participant, error) {
+	filter := bson.D{
+		{Key: "tipo_participante", Value: string(tipo)},
+		{Key: "usuario_id", Value: userIDValue(usuarioID)},
+	}
+	cur, err := r.col.Find(ctx, filter)
+	if err != nil {
+		return nil, apierr.Internal(err.Error())
+	}
+	defer cur.Close(ctx)
+	var out []convitedomain.Participant
+	for cur.Next(ctx) {
+		var doc conviteParticipantDoc
+		if err := cur.Decode(&doc); err != nil {
+			return nil, apierr.Internal(err.Error())
+		}
+		out = append(out, *conviteParticipantFromDoc(doc))
+	}
+	return out, cur.Err()
+}
+
 // Save upserts a participant.
 func (r *ConviteParticipantMongoRepository) Save(ctx context.Context, p *convitedomain.Participant) (*convitedomain.Participant, error) {
 	if p == nil {
