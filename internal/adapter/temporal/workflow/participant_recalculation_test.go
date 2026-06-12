@@ -26,11 +26,11 @@ func TestParticipantRecalculation(t *testing.T) {
 	suite.Run(t, new(ParticipantRecalculationTestSuite))
 }
 
-// stubRecalculator is a no-op financeRecalculator used only to satisfy the
+// stubParticipantRecalculator is a no-op financeRecalculator used only to satisfy the
 // constructor; real activity calls are intercepted by env.OnActivity mocks.
-type stubRecalculator struct{}
+type stubParticipantRecalculator struct{}
 
-func (stubRecalculator) Execute(_ context.Context, _ portin.RecalculateFinanceSummaryInput) (*financedomain.FinanceSummary, error) {
+func (stubParticipantRecalculator) Execute(_ context.Context, _ portin.RecalculateFinanceSummaryInput) (*financedomain.FinanceSummary, error) {
 	return &financedomain.FinanceSummary{}, nil
 }
 
@@ -38,7 +38,7 @@ func (stubRecalculator) Execute(_ context.Context, _ portin.RecalculateFinanceSu
 // pre-registered (required for OnActivity dispatch by string name).
 func (s *ParticipantRecalculationTestSuite) newEnv() *testsuite.TestWorkflowEnvironment {
 	env := s.NewTestWorkflowEnvironment()
-	acts := temporalactivity.NewParticipantRecalculationActivities(stubRecalculator{})
+	acts := temporalactivity.NewParticipantRecalculationActivities(stubParticipantRecalculator{})
 	env.RegisterActivity(acts)
 	env.RegisterWorkflow(workflow.ParticipantRecalculationWorkflow)
 	return env
