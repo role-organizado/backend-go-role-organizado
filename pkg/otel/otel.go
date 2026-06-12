@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	goslog "log/slog"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
@@ -161,9 +162,20 @@ func newResource(cfg Config) (*resource.Resource, error) {
 	)
 }
 
+// endpointHostPort normalizes an OTLP endpoint to the "host:port" form expected
+// by the exporters' WithEndpoint option. The configured value may be a full URL
+// (e.g. "http://10.11.12.74:4318"); passing that to WithEndpoint would prepend a
+// second scheme and produce an invalid URL, so strip any leading scheme here.
+func endpointHostPort(endpoint string) string {
+	if i := strings.Index(endpoint, "://"); i != -1 {
+		return endpoint[i+len("://"):]
+	}
+	return endpoint
+}
+
 func newTracerProvider(ctx context.Context, endpoint string, res *resource.Resource) (*sdktrace.TracerProvider, error) {
 	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
+		otlptracehttp.WithEndpoint(endpointHostPort(endpoint)),
 		otlptracehttp.WithInsecure(),
 		otlptracehttp.WithTimeout(10*time.Second),
 	)
@@ -180,7 +192,7 @@ func newTracerProvider(ctx context.Context, endpoint string, res *resource.Resou
 
 func newLoggerProvider(ctx context.Context, endpoint string, res *resource.Resource) (*sdklog.LoggerProvider, error) {
 	exporter, err := otlploghttp.New(ctx,
-		otlploghttp.WithEndpoint(endpoint),
+		otlploghttp.WithEndpoint(endpointHostPort(endpoint)),
 		otlploghttp.WithInsecure(),
 		otlploghttp.WithTimeout(10*time.Second),
 	)
@@ -196,7 +208,7 @@ func newLoggerProvider(ctx context.Context, endpoint string, res *resource.Resou
 
 func newMeterProvider(ctx context.Context, endpoint string, res *resource.Resource) (*sdkmetric.MeterProvider, error) {
 	exporter, err := otlpmetrichttp.New(ctx,
-		otlpmetrichttp.WithEndpoint(endpoint),
+		otlpmetrichttp.WithEndpoint(endpointHostPort(endpoint)),
 		otlpmetrichttp.WithInsecure(),
 		otlpmetrichttp.WithTimeout(10*time.Second),
 	)
