@@ -24,6 +24,7 @@ import (
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/mongodb"
 	temporaladapter "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal"
+	sqsadapter "github.com/role-organizado/backend-go-role-organizado/internal/adapter/sqs"
 	temporalactivity "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
 	temporalworker "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/worker"
 	"github.com/role-organizado/backend-go-role-organizado/internal/config"
@@ -359,9 +360,15 @@ func main() {
 	getByTypeTemplateUC := ucnotiftemplate.NewGetByTypeNotificationTemplate(notifTemplateRepo)
 	listCategoriaTemplateUC := ucnotiftemplate.NewListByCategoriaNotificationTemplate(notifTemplateRepo)
 
+	// Notification stages — reuse the notification_templates collection (Java parity).
+	notifStageRepo := mongodb.NewNotificationStageRepository(mongoClient)
+	manageStagesUC := ucnotiftemplate.NewManageNotificationStages(notifStageRepo)
+
 	notifTemplateHandler := handler.NewNotificationTemplateHandler(
 		createTemplateUC, getTemplateUC, listTemplatesUC, updateTemplateUC, deleteTemplateUC,
 		renderTemplateUC, testSendTemplateUC, getByTypeTemplateUC, listCategoriaTemplateUC,
+		manageStagesUC, manageStagesUC.AsGetUseCase(), manageStagesUC.AsUpsertUseCase(),
+		manageStagesUC.AsDeleteUseCase(), manageStagesUC.AsTestSendUseCase(),
 	)
 
 	notificacaoRepo := mongodb.NewNotificacaoRepository(mongoClient)
@@ -498,13 +505,28 @@ func main() {
 	// audit_entries, payment_installments, dominios). All UUIDs stored as Binary subtype 4.
 	conviteParticipantRepo := mongodb.NewConviteParticipantRepository(mongoClient)
 	conviteGuestRepo := mongodb.NewConviteGuestRepository(mongoClient)
+
+	// Guest → user linking (Feature 016/027), invoked after /register + OAuth.
+	// Draft rewriting is left disabled (nil) until an EventoDraft convidados
+	// conversion port is implemented; participant migration is wired live.
+	vincularGuestUC := ucguest.NewVincularGuest(guestRepo, conviteParticipantRepo, nil)
+	authHandler.WithVincularGuest(vincularGuestUC)
 	conviteApprovalRepo := mongodb.NewConviteApprovalRepository(mongoClient)
 	conviteCreditRepo := mongodb.NewConviteParticipantCreditRepository(mongoClient)
 	conviteAuditRepo := mongodb.NewConviteAuditRepository(mongoClient)
 	convitePoliticaRepo := mongodb.NewConvitePoliticaRepository(mongoClient)
 	conviteInstallmentRepo := mongodb.NewConviteInstallmentRepository(mongoClient)
-	// TODO: replace with real SQS adapter when wired in cfg.SQS.Enabled.
-	conviteNotifPort := mongodb.NewNoopConviteNotificationAdapter()
+	// Convite notification port: real SQS publisher when enabled, no-op otherwise.
+	var conviteNotifPort portout.ConviteNotificationPort = mongodb.NewNoopConviteNotificationAdapter()
+	if cfg.SQS.Enabled {
+		sqsPublisher, sqsErr := sqsadapter.NewConvitePublisher(ctx, cfg.SQS)
+		if sqsErr != nil {
+			slog.Error("failed to initialise SQS convite publisher; falling back to no-op", "error", sqsErr)
+		} else {
+			conviteNotifPort = sqsPublisher
+			slog.Info("SQS convite publisher enabled", "region", cfg.SQS.Region, "queueURL", cfg.SQS.QueueURL)
+		}
+	}
 
 	// Use cases — buscar must be wired first because confirmar/recusar reuse it.
 	buscarConviteUC := ucconvite.NewBuscarConvite(
@@ -715,7 +737,7 @@ func main() {
 	approveOutboundUC := ucoutbound.NewApproveOutboundRequest(
 		outboundRequestRepo, eventoRepo, participantRepo,
 		outboundTransferProvider, outboundAuditLogRepo,
-	)
+	).WithTemporalStarter(temporalStarter)
 	rejectOutboundUC := ucoutbound.NewRejectOutboundRequest(
 		outboundRequestRepo, eventoRepo, participantRepo, outboundAuditLogRepo,
 	)

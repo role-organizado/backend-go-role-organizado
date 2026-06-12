@@ -46,6 +46,35 @@ type BatchGetGuestsUseCase interface {
 	Execute(ctx context.Context, ids []string) ([]guest.Guest, error)
 }
 
+// ---- Vinculação de guests a usuário ----
+
+// VincularGuestInput carries the freshly-created user's identity plus an optional
+// explicit participantId (invite-link mode).
+type VincularGuestInput struct {
+	UsuarioID string
+	Telefone  string // E.164 normalized (+5511999999999), may be empty
+	Email     string // may be empty
+	// ParticipantID, when set, switches to explicit invite-link linking: only that
+	// participant is migrated GUEST→USER. When empty, implicit phone/email linking runs.
+	ParticipantID string
+}
+
+// VinculacaoResult holds the statistics of a guest-to-user linking operation.
+type VinculacaoResult struct {
+	GuestsEncontrados       int `json:"guestsEncontrados"`
+	ConvitesVinculados      int `json:"convitesVinculados"`
+	EventosLinkados         int `json:"eventosLinkados"`
+	DraftsAtualizados       int `json:"draftsAtualizados"`
+	ParticipantsAtualizados int `json:"participantsAtualizados"`
+}
+
+// VincularGuestAUsuarioUseCase links existing guests to a newly-registered user.
+// Idempotent: repeated calls produce the same end state. Invoked after user
+// creation in the /register and OAuth callback flows.
+type VincularGuestAUsuarioUseCase interface {
+	Execute(ctx context.Context, in VincularGuestInput) (*VinculacaoResult, error)
+}
+
 // ---- Biometric use cases ----
 
 // GenerateChallengeInput is the payload for /biometric/challenge.

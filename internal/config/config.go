@@ -86,8 +86,12 @@ type RedisConfig struct {
 
 // SQSConfig holds AWS SQS settings.
 type SQSConfig struct {
-	Region    string
-	QueueURL  string
+	Region   string
+	QueueURL string
+	// Enabled controls whether the real SQS publisher is wired. When false the
+	// no-op convite notification adapter is used instead (local dev default).
+	// Set via ROLE_SQS_ENABLED.
+	Enabled bool
 }
 
 // WhatsAppConfig holds Meta WhatsApp Business Cloud API settings.
@@ -190,6 +194,7 @@ func Load() (*AppConfig, error) {
 		SQS: SQSConfig{
 			Region:   v.GetString("sqs.region"),
 			QueueURL: v.GetString("sqs.queue_url"),
+			Enabled:  v.GetBool("sqs.enabled"),
 		},
 		Asaas: AsaasConfig{
 			BaseURL:      v.GetString("asaas.base_url"),
@@ -238,6 +243,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redis.db", 0)
 
 	v.SetDefault("sqs.region", "us-east-1")
+	v.SetDefault("sqs.enabled", false)
+	_ = v.BindEnv("sqs.enabled", "ROLE_SQS_ENABLED")
 
 	v.SetDefault("asaas.base_url", "https://sandbox.asaas.com/api/v3")
 	// UseMock defaults to true so local dev never calls the real Asaas API.

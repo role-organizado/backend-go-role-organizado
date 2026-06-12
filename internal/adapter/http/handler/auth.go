@@ -23,6 +23,16 @@ type AuthHandler struct {
 	logout         portin.LogoutUseCase
 	googleAuth     portin.GoogleAuthUseCase
 	appleAuth      portin.AppleAuthUseCase
+	// vincularGuest links pre-existing guests to a freshly-created user. Optional
+	// (nil disables the post-creation linking step).
+	vincularGuest portin.VincularGuestAUsuarioUseCase
+}
+
+// WithVincularGuest attaches the guest-linking use case, invoked after a user is
+// created via /register or an OAuth callback. Returns the handler for chaining.
+func (h *AuthHandler) WithVincularGuest(uc portin.VincularGuestAUsuarioUseCase) *AuthHandler {
+	h.vincularGuest = uc
+	return h
 }
 
 // NewAuthHandler creates a new AuthHandler.
@@ -149,7 +159,40 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	h.linkGuests(r, out)
 	writeJSON(w, http.StatusCreated, toAuthResponse(out))
+}
+
+// linkGuests best-effort links pre-existing guests to the newly-created user.
+// Failures never break the auth flow — they are logged and swallowed. The
+// optional participantId query parameter switches to explicit invite-link mode.
+func (h *AuthHandler) linkGuests(r *http.Request, out *portin.AuthOutput) {
+	if h.vincularGuest == nil || out == nil || out.Usuario == nil {
+		return
+	}
+	u := out.Usuario
+	in := portin.VincularGuestInput{
+		UsuarioID:     u.ID,
+		Email:         u.Email,
+		Telefone:      formatTelefoneE164(u.Telefone),
+		ParticipantID: r.URL.Query().Get("participantId"),
+	}
+	if _, err := h.vincularGuest.Execute(r.Context(), in); err != nil {
+		slog.WarnContext(r.Context(), "guest linking failed (non-fatal)", "usuarioId", u.ID, "error", err)
+	}
+}
+
+// formatTelefoneE164 renders a Telefone as +<DDI><DDD><Numero>, defaulting the
+// country code to Brazil (55). Returns "" when no number is present.
+func formatTelefoneE164(t *auth.Telefone) string {
+	if t == nil || t.Numero == "" {
+		return ""
+	}
+	ddi := t.DDI
+	if ddi == "" {
+		ddi = "55"
+	}
+	return "+" + ddi + t.DDD + t.Numero
 }
 
 // Refresh godoc
@@ -236,6 +279,7 @@ func (h *AuthHandler) GoogleAuth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	h.linkGuests(r, out)
 	writeJSON(w, http.StatusOK, toAuthResponse(out))
 }
 
@@ -258,6 +302,7 @@ func (h *AuthHandler) AppleAuth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	h.linkGuests(r, out)
 	writeJSON(w, http.StatusOK, toAuthResponse(out))
 }
 
