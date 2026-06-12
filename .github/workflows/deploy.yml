@@ -62,7 +62,7 @@ jobs:
   build:
     name: 🐳 Build Docker Image
     needs: test
-    runs-on: [self-hosted, backend]
+    runs-on: [self-hosted, backend-go]
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && (
@@ -154,7 +154,7 @@ jobs:
   deploy:
     name: 🚀 Deploy to Proxmox LXC
     needs: build
-    runs-on: [self-hosted, backend]
+    runs-on: [self-hosted, backend-go]
     environment:
       name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/staging' && 'staging') || 'development' }}
     # TARGET_HOST e demais vars vêm do Infisical (Infisical é a única fonte de secrets).
@@ -438,7 +438,7 @@ jobs:
   smoke-test:
     name: 🔥 Smoke Tests
     needs: deploy
-    runs-on: [self-hosted, backend]
+    runs-on: [self-hosted, backend-go]
     environment:
       name: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/staging' && 'staging') || 'development' }}
 
