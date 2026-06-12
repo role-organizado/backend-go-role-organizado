@@ -420,3 +420,37 @@ type EventoRateioItemInfo struct {
 type GetEventoCompletoUseCase interface {
 	Execute(ctx context.Context, eventoID string) (*EventoCompletoResult, error)
 }
+
+// ---- Event publication monitoring ----
+
+// FindStuckExecutionsInput parameterizes the stuck-execution scan run by the
+// EventPublicationMonitoringWorkflow.
+type FindStuckExecutionsInput struct {
+	// StuckThresholdMinutes is how old (in minutes) a PENDING/PROCESSING execution
+	// must be before it is considered stuck.
+	StuckThresholdMinutes int
+	// MaxResults caps the number of stuck executions returned in a single scan.
+	MaxResults int
+}
+
+// StuckExecution describes a single execution flagged as stuck.
+type StuckExecution struct {
+	TransactionID string    `json:"transactionId"`
+	EventID       string    `json:"eventId"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"createdAt"`
+	AgeMinutes    int       `json:"ageMinutes"`
+}
+
+// FindStuckExecutionsResult is the outcome of a stuck-execution scan.
+type FindStuckExecutionsResult struct {
+	StuckCount int              `json:"stuckCount"`
+	Executions []StuckExecution `json:"executions"`
+}
+
+// FindStuckExecutionsUseCase scans for payment executions that have been pending
+// longer than a threshold and reports them so the monitoring workflow can raise
+// alerts. Read-only and idempotent — safe to run on a fixed cadence.
+type FindStuckExecutionsUseCase interface {
+	Execute(ctx context.Context, in FindStuckExecutionsInput) (*FindStuckExecutionsResult, error)
+}

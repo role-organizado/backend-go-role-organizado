@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	sdkclient "go.temporal.io/sdk/client"
 
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/handler"
 	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
@@ -39,6 +40,8 @@ import (
 	ucevent "github.com/role-organizado/backend-go-role-organizado/internal/usecase/event"
 	// Phase 4
 	ucrateio "github.com/role-organizado/backend-go-role-organizado/internal/usecase/rateio"
+	// Onda 3/4 — participant lifecycle use cases
+	ucparticipant "github.com/role-organizado/backend-go-role-organizado/internal/usecase/participant"
 	// Phase 5
 	ucpayment "github.com/role-organizado/backend-go-role-organizado/internal/usecase/payment"
 	ucasaas "github.com/role-organizado/backend-go-role-organizado/internal/infra/asaas"
@@ -522,6 +525,10 @@ func main() {
 	// run correctly without a live Temporal cluster.
 	var temporalStarter portout.TemporalWorkflowStarter = &temporaladapter.NoopWorkflowStarter{}
 	var temporalSignaler portout.TemporalWorkflowSignaler = &temporaladapter.NoopWorkflowSignaler{}
+	// temporalQueryClient backs the native workflow status/signal handler. It stays
+	// nil when the worker is disabled, in which case the handler falls back to the
+	// Java proxy. Set in the Phase 9 worker block below.
+	var temporalQueryClient sdkclient.Client
 
 	if cfg.Temporal.WorkerEnabled {
 		temporalClient, temporalErr := temporaladapter.NewClient(cfg.Temporal)
@@ -622,6 +629,8 @@ func main() {
 	)
 
 	// --- Phase 8b: Temporal Workflow Proxies (Java fallback) ---
+	// The native handler serves the 6 migrated (Go) workflows directly via the
+	// Temporal Go SDK and falls back to this proxy for everything else.
 	workflowProxyHandler := handler.NewWorkflowProxyHandler(cfg.Server.JavaBackendURL)
 
 	// --- Phase 5b: Payment Methods + PIX validate + Saved Cards (hexagonal) ---
@@ -742,14 +751,49 @@ func main() {
 			os.Exit(1)
 		}
 		defer temporalClient.Close()
+		// Expose the client to the native workflow status/signal handler.
+		temporalQueryClient = temporalClient
+
 		temporalRegistry := temporalworker.NewRegistry(temporalClient)
-		// Workers are registered per migration wave (T003, T004, T005, T006).
+
+		// ── Onda 3/4 native workflows ─────────────────────────────────────────
+		// 1. Participant lifecycle.
+		participantCancelUC := ucparticipant.NewCancelParticipantInstallments(installmentRepo, eventoRepo)
+		participantRecalcUC := ucparticipant.NewRecalculateRateioAllocations(rateioRepo, eventoRepo)
+		participantLifecycleActs := temporalactivity.NewParticipantLifecycleActivities(participantCancelUC, participantRecalcUC)
+		temporalRegistry.RegisterParticipantLifecycleWorker(participantLifecycleActs)
+
+		// 2. Invite lifecycle (expiration auto-declines via RecusarConvite).
+		inviteLifecycleActs := temporalactivity.NewInviteLifecycleActivities(recusarConviteUC)
+		temporalRegistry.RegisterInviteLifecycleWorker(inviteLifecycleActs)
+
+		// 3. Outbound execution.
+		outboundExecActs := temporalactivity.NewOutboundExecutionActivities(approveOutboundUC, handleOutboundCallbackUC)
+		temporalRegistry.RegisterOutboundExecutionWorker(outboundExecActs)
+
+		// 4. Event lifecycle.
+		eventLifecycleActs := temporalactivity.NewEventLifecycleActivities(alterarFaseUC)
+		temporalRegistry.RegisterEventLifecycleWorker(eventLifecycleActs)
+
+		// 5. Event publication monitoring (stuck-execution scan).
+		findStuckUC := ucevent.NewFindStuckExecutions(txRepo)
+		eventPubMonitoringActs := temporalactivity.NewEventPublicationMonitoringActivities(findStuckUC)
+		temporalRegistry.RegisterEventPublicationMonitoringWorker(eventPubMonitoringActs)
+
+		// 6. Event publication execution.
+		eventPubExecActs := temporalactivity.NewEventPublicationExecutionActivities(publishDraftUC)
+		temporalRegistry.RegisterEventPublicationExecutionWorker(eventPubExecActs)
+
 		if err := temporalRegistry.Start(); err != nil {
 			slog.Error("failed to start Temporal workers", "error", err)
 			os.Exit(1)
 		}
 		defer temporalRegistry.Stop()
 	}
+
+	// Native Temporal workflow handler (serves the 6 migrated workflows via the Go
+	// SDK; falls back to the Java proxy when the client is nil or lookup fails).
+	workflowNativeHandler := handler.NewWorkflowNativeHandler(temporalQueryClient, workflowProxyHandler)
 
 	// Build chi router.
 	r := chi.NewRouter()
@@ -793,7 +837,7 @@ func main() {
 		notificationHandler.RegisterNotificationRoutes(r)
 		notifTemplateHandler.RegisterNotificationTemplateRoutes(r)
 		storageHandler.RegisterStorageRoutes(r)
-		workflowProxyHandler.RegisterWorkflowRoutes(r)
+		workflowNativeHandler.RegisterWorkflowRoutes(r)
 		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 		listaPresentesHandler.RegisterListaPresentesRoutes(r)
 		socialHandler.RegisterSocialRoutes(r)

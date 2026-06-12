@@ -150,8 +150,27 @@ const (
 
 	// ReconciliationTaskQueue is the Temporal task queue for reconciliation workflows.
 	ReconciliationTaskQueue = "reconciliation-queue"
-// Package workflow contains Temporal workflow definitions and ID helpers.
-// PricingPspReviewPrimaryID returns the deterministic workflow ID for a
-// manual/triggered PricingPspReview run, scoped to a specific reference date.
-// Example: pricing-psp-review-real-2026-06-06
+
+	// ─── Onda 3/4 native workflow task queues ─────────────────────────────────
+	// These are the task queues for the natively-implemented (Go) Temporal
+	// workflows migrated from the Java backend. Each gets a dedicated queue so a
+	// single workflow type's load can be scaled independently of the others.
+
+	// ParticipantLifecycleTaskQueue hosts ParticipantLifecycleWorkflow.
+	ParticipantLifecycleTaskQueue = "PARTICIPANT_LIFECYCLE_QUEUE"
+
+	// InviteLifecycleTaskQueue hosts InviteLifecycleWorkflow.
+	InviteLifecycleTaskQueue = "INVITE_LIFECYCLE_QUEUE"
+
+	// OutboundExecutionTaskQueue hosts OutboundExecutionWorkflow.
+	OutboundExecutionTaskQueue = "OUTBOUND_EXECUTION_QUEUE"
+
+	// EventLifecycleTaskQueue hosts EventLifecycleWorkflow.
+	EventLifecycleTaskQueue = "EVENT_LIFECYCLE_QUEUE"
+
+	// EventPublicationMonitoringTaskQueue hosts EventPublicationMonitoringWorkflow.
+	EventPublicationMonitoringTaskQueue = "EVENT_PUBLICATION_MONITORING_QUEUE"
+
+	// EventPublicationExecutionTaskQueue hosts EventPublicationExecutionWorkflow.
+	EventPublicationExecutionTaskQueue = "EVENT_PUBLICATION_EXECUTION_QUEUE"
 )
