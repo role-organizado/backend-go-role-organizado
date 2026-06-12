@@ -48,7 +48,11 @@ func (m *mockPaymentTxRepo) FindByUserID(ctx context.Context, uid string, f port
 	return nil, 0, nil
 }
 func (m *mockPaymentTxRepo) FindPendingOlderThan(ctx context.Context, t time.Time) ([]*paymentdomain.PaymentTransaction, error) {
-	return nil, nil
+	a := m.Called(ctx, t)
+	if a.Get(0) == nil {
+		return nil, a.Error(1)
+	}
+	return a.Get(0).([]*paymentdomain.PaymentTransaction), a.Error(1)
 }
 func (m *mockPaymentTxRepo) FindByEventID(ctx context.Context, eventID string) ([]*paymentdomain.PaymentTransaction, error) {
 	a := m.Called(ctx, eventID)
