@@ -7,6 +7,7 @@ import (
 	domain "github.com/role-organizado/backend-go-role-organizado/internal/domain/auth"
 	portin "github.com/role-organizado/backend-go-role-organizado/internal/port/in"
 	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
+	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
 
 // GetUsuario implements portin.GetUsuarioUseCase.
@@ -104,4 +105,74 @@ func (uc *UpdateUserRole) Execute(ctx context.Context, in portin.UpdateUserRoleI
 	}
 	usuario.Roles = in.Roles
 	return uc.usuarios.Update(ctx, usuario)
+}
+
+// AddUserRole implements portin.AddUserRoleUseCase.
+type AddUserRole struct {
+	usuarios portout.UsuarioRepository
+}
+
+// NewAddUserRole creates a new AddUserRole use case.
+func NewAddUserRole(u portout.UsuarioRepository) *AddUserRole {
+	return &AddUserRole{usuarios: u}
+}
+
+// Execute appends a role to the user if not already present (idempotent).
+func (uc *AddUserRole) Execute(ctx context.Context, in portin.ModifyUserRoleInput) (*domain.Usuario, error) {
+	slog.InfoContext(ctx, "add user role", "usuarioId", in.UsuarioID, "role", in.Role)
+	if !isValidRole(in.Role) {
+		return nil, apierr.BadRequest("role inválida: " + string(in.Role))
+	}
+	usuario, err := uc.usuarios.FindByID(ctx, in.UsuarioID)
+	if err != nil {
+		return nil, err
+	}
+	if usuario.HasRole(in.Role) {
+		return usuario, nil
+	}
+	usuario.Roles = append(usuario.Roles, in.Role)
+	return uc.usuarios.Update(ctx, usuario)
+}
+
+// RemoveUserRole implements portin.RemoveUserRoleUseCase.
+type RemoveUserRole struct {
+	usuarios portout.UsuarioRepository
+}
+
+// NewRemoveUserRole creates a new RemoveUserRole use case.
+func NewRemoveUserRole(u portout.UsuarioRepository) *RemoveUserRole {
+	return &RemoveUserRole{usuarios: u}
+}
+
+// Execute removes a role from the user. Removing the last role is rejected.
+func (uc *RemoveUserRole) Execute(ctx context.Context, in portin.ModifyUserRoleInput) (*domain.Usuario, error) {
+	slog.InfoContext(ctx, "remove user role", "usuarioId", in.UsuarioID, "role", in.Role)
+	usuario, err := uc.usuarios.FindByID(ctx, in.UsuarioID)
+	if err != nil {
+		return nil, err
+	}
+	if !usuario.HasRole(in.Role) {
+		return usuario, nil
+	}
+	if len(usuario.Roles) <= 1 {
+		return nil, apierr.Unprocessable("não é possível remover a última role do usuário")
+	}
+	filtered := make([]domain.Role, 0, len(usuario.Roles))
+	for _, r := range usuario.Roles {
+		if r != in.Role {
+			filtered = append(filtered, r)
+		}
+	}
+	usuario.Roles = filtered
+	return uc.usuarios.Update(ctx, usuario)
+}
+
+// isValidRole reports whether r is a known role.
+func isValidRole(r domain.Role) bool {
+	switch r {
+	case domain.RoleUser, domain.RoleAdmin, domain.RoleModerator:
+		return true
+	default:
+		return false
+	}
 }

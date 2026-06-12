@@ -14,9 +14,9 @@ import (
 )
 
 // newApprovalsRouter returns a chi router with approvals routes registered.
-// Passes nil as the mongo client — safe for tests that return before hitting the DB layer.
+// Passes nil use cases — safe for tests that return (401) before hitting the use-case layer.
 func newApprovalsRouter() *chi.Mux {
-	h := handler.NewApprovalsHandler(nil)
+	h := handler.NewApprovalsHandler(nil, nil, nil)
 	r := chi.NewRouter()
 	h.RegisterApprovalsRoutes(r)
 	return r

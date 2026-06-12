@@ -66,6 +66,8 @@ import (
 	ucconvite "github.com/role-organizado/backend-go-role-organizado/internal/usecase/convite"
 	// Outbound Transfers (withdrawals + voting approval)
 	ucoutbound "github.com/role-organizado/backend-go-role-organizado/internal/usecase/outbound"
+	// Admin surface (Trilha C: 9 Java admin controllers → hexagonal)
+	ucadmin "github.com/role-organizado/backend-go-role-organizado/internal/usecase/admin"
 )
 
 // publicPrefixes are routes that bypass JWT authentication.
@@ -681,11 +683,9 @@ func main() {
 		sendRemindersUC, holdBalanceUC, paymentStatusUC, paymentAccountsUC, auditTrailUC,
 	)
 
-	// --- Admin, Participantes handlers (direct MongoDB) ---
-	adminHandler := handler.NewAdminHandler(mongoClient)
+	// --- Participantes handlers (direct MongoDB) ---
 	participantesHandler := handler.NewParticipantesHandler(mongoClient)
 	usuariosEventoHandler := handler.NewUsuariosEventoHandler(mongoClient)
-	approvalsHandler := handler.NewApprovalsHandler(mongoClient)
 
 	// --- Misc handlers (Bloco 3d parity) ---
 	cardapioHandler := handler.NewCardapioHandler(mongoClient)
@@ -732,6 +732,46 @@ func main() {
 	)
 	outboundWebhookHandler := handler.NewOutboundWebhookHandler(
 		handleOutboundCallbackUC, webhookRepo, cfg.Asaas.WebhookToken,
+	)
+
+	// === ADMIN SURFACE (hexagonal) ===
+	// Trilha C: 9 Java admin controllers migrated to hexagonal use cases.
+	// Repos reused: dominioRepo, usuarioRepo, eventoRepo, financeSummaryRepo,
+	// outboundRequestRepo. New repos: admin metrics, feature flags, approvals,
+	// reconciliation report reader.
+	adminMetricsRepo := mongodb.NewAdminMetricsRepository(mongoClient)
+	featureFlagRepo := mongodb.NewFeatureFlagRepository(mongoClient)
+	approvalRepo := mongodb.NewApprovalRepository(mongoClient)
+	reconReportReader := mongodb.NewReconciliationReportRepository(mongoClient)
+
+	addUserRoleUC := ucauth.NewAddUserRole(usuarioRepo)
+	removeUserRoleUC := ucauth.NewRemoveUserRole(usuarioRepo)
+
+	adminHandler := handler.NewAdminHandler(handler.AdminHandlerDeps{
+		Stats:           ucadmin.NewGetDashboardStats(adminMetricsRepo),
+		Health:          ucadmin.NewGetDashboardHealth(adminMetricsRepo),
+		Finance:         ucadmin.NewGetDashboardFinance(adminMetricsRepo),
+		PendingOutbound: ucadmin.NewGetPendingOutbound(eventoRepo, outboundRequestRepo),
+		ListFlags:       ucadmin.NewListFeatureFlags(featureFlagRepo),
+		UpdateFlag:      ucadmin.NewUpdateFeatureFlag(featureFlagRepo),
+		GetDominio:      ucadmin.NewGetDominioByID(dominioRepo),
+		ToggleDominio:   ucadmin.NewToggleDominio(dominioRepo),
+		ListCategorias:  ucadmin.NewListDominioCategorias(dominioRepo),
+		ListPolicies:    ucadmin.NewListCancelamentoPolicies(dominioRepo),
+		UpdateTiers:     ucadmin.NewUpdateCancelamentoTiers(dominioRepo),
+		ListEventos:     ucadmin.NewListEventosAdmin(eventoRepo),
+		Completo:        ucadmin.NewGetEventoCompletoAdmin(eventoRepo, usuarioRepo, financeSummaryRepo, outboundRequestRepo),
+		Cancelar:        ucadmin.NewCancelarEventoAdmin(eventoRepo),
+		Fechar:          ucadmin.NewFecharFinanceiroAdmin(eventoRepo),
+		AddRole:         addUserRoleUC,
+		RemoveRole:      removeUserRoleUC,
+		ListReports:     ucadmin.NewListReconciliationReports(reconReportReader),
+		LatestReport:    ucadmin.NewGetLatestReconciliationReport(reconReportReader),
+	})
+	approvalsHandler := handler.NewApprovalsHandler(
+		ucadmin.NewCountPendingApprovals(approvalRepo),
+		ucadmin.NewListPendingApprovals(approvalRepo),
+		ucadmin.NewListApprovalHistory(approvalRepo),
 	)
 
 	// --- Phase 9: Temporal Workers ---
@@ -794,6 +834,7 @@ func main() {
 		notifTemplateHandler.RegisterNotificationTemplateRoutes(r)
 		storageHandler.RegisterStorageRoutes(r)
 		workflowProxyHandler.RegisterWorkflowRoutes(r)
+		workflowProxyHandler.RegisterAdminWorkflowRoutes(r)
 		cofrinhoHandler.RegisterCofrinhoRoutes(r)
 		listaPresentesHandler.RegisterListaPresentesRoutes(r)
 		socialHandler.RegisterSocialRoutes(r)
