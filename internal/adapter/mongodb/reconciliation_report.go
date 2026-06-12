@@ -7,8 +7,11 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	temporalactivity "github.com/role-organizado/backend-go-role-organizado/internal/adapter/temporal/activity"
+	"github.com/role-organizado/backend-go-role-organizado/internal/domain/admin"
+	"github.com/role-organizado/backend-go-role-organizado/pkg/apierr"
 )
 
 // reconciliationReportDoc is the BSON representation of a ReconciliationReport
@@ -85,3 +88,65 @@ func (r *ReconciliationReportRepository) Save(ctx context.Context, report *tempo
 
 // compile-time interface assertion.
 var _ temporalactivity.ReconciliationReportRepository = (*ReconciliationReportRepository)(nil)
+
+// FindRecent returns the most recent reconciliation reports, newest first.
+// Implements out.ReconciliationReportReader.
+func (r *ReconciliationReportRepository) FindRecent(ctx context.Context, limit int) ([]admin.ReconciliationReport, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "runAt", Value: -1}}).SetLimit(int64(limit))
+	cursor, err := r.coll.Find(ctx, bson.M{}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("reconciliation report: find recent: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var docs []reconciliationReportDoc
+	if err := cursor.All(ctx, &docs); err != nil {
+		return nil, fmt.Errorf("reconciliation report: decode recent: %w", err)
+	}
+	out := make([]admin.ReconciliationReport, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, reconciliationReportToDomain(d))
+	}
+	return out, nil
+}
+
+// FindLatest returns the single most recent reconciliation report.
+// Implements out.ReconciliationReportReader.
+func (r *ReconciliationReportRepository) FindLatest(ctx context.Context) (*admin.ReconciliationReport, error) {
+	opts := options.FindOne().SetSort(bson.D{{Key: "runAt", Value: -1}})
+	var doc reconciliationReportDoc
+	if err := r.coll.FindOne(ctx, bson.M{}, opts).Decode(&doc); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, apierr.NotFoundMsg("nenhum relatório de reconciliação encontrado")
+		}
+		return nil, fmt.Errorf("reconciliation report: find latest: %w", err)
+	}
+	report := reconciliationReportToDomain(doc)
+	return &report, nil
+}
+
+func reconciliationReportToDomain(d reconciliationReportDoc) admin.ReconciliationReport {
+	updates := make([]admin.ReconciliationUpdate, 0, len(d.Updates))
+	for _, u := range d.Updates {
+		updates = append(updates, admin.ReconciliationUpdate{
+			TransactionID:  u.TransactionID,
+			PreviousStatus: u.PreviousStatus,
+			NewStatus:      u.NewStatus,
+			ProviderStatus: u.ProviderStatus,
+			UpdatedAt:      u.UpdatedAt,
+		})
+	}
+	return admin.ReconciliationReport{
+		ID:            d.ID,
+		ReferenceDate: d.ReferenceDate,
+		RunAt:         d.RunAt,
+		CheckedCount:  d.CheckedCount,
+		UpdatedCount:  d.UpdatedCount,
+		FailedCount:   d.FailedCount,
+		Updates:       updates,
+		Errors:        d.Errors,
+	}
+}

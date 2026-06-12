@@ -113,3 +113,20 @@ type UpdateUserRoleInput struct {
 type UpdateUserRoleUseCase interface {
 	Execute(ctx context.Context, in UpdateUserRoleInput) (*auth.Usuario, error)
 }
+
+// ModifyUserRoleInput carries a single role to add or remove (admin only).
+type ModifyUserRoleInput struct {
+	UsuarioID string
+	Role      auth.Role
+}
+
+// AddUserRoleUseCase appends a role to a user's roles (idempotent).
+type AddUserRoleUseCase interface {
+	Execute(ctx context.Context, in ModifyUserRoleInput) (*auth.Usuario, error)
+}
+
+// RemoveUserRoleUseCase removes a role from a user's roles.
+// Removing the last remaining role is rejected (Java parity).
+type RemoveUserRoleUseCase interface {
+	Execute(ctx context.Context, in ModifyUserRoleInput) (*auth.Usuario, error)
+}

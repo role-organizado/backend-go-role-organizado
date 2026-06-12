@@ -53,6 +53,32 @@ func (h *WorkflowProxyHandler) RegisterWorkflowRoutes(r chi.Router) {
 	})
 }
 
+// RegisterAdminWorkflowRoutes proxies the admin Temporal-workflow controllers
+// (AdminAccountingSnapshot, AdminFinanceReconciliation, AdminOverdueInstallment,
+// AdminReconciliationWorkflow) to the Java backend. These start/signal/query
+// live Temporal workflows, which the Go service's Noop starters cannot fulfil —
+// proxying is the correct treatment during the Strangler-Fig migration.
+func (h *WorkflowProxyHandler) RegisterAdminWorkflowRoutes(r chi.Router) {
+	r.Route("/api/v1/admin/workflows", func(r chi.Router) {
+		// AdminAccountingSnapshotController
+		r.Post("/accounting/snapshot/trigger", h.proxy)
+		r.Get("/accounting/snapshot/{workflowId}/status", h.proxy)
+
+		// AdminFinanceReconciliationController
+		r.Post("/reconciliation/finance/trigger", h.proxy)
+
+		// AdminOverdueInstallmentController
+		r.Post("/overdue-installment/trigger", h.proxy)
+
+		// AdminReconciliationWorkflowController
+		r.Post("/reconciliation/psp/trigger", h.proxy)
+		r.Get("/reconciliation/psp/{workflowId}/status", h.proxy)
+		r.Post("/reconciliation/psp/{workflowId}/pause", h.proxy)
+		r.Post("/reconciliation/psp/{workflowId}/resume", h.proxy)
+		r.Post("/reconciliation/psp/{workflowId}/cancel", h.proxy)
+	})
+}
+
 // proxy forwards the request to the Java backend preserving path, query, headers, and body.
 func (h *WorkflowProxyHandler) proxy(w http.ResponseWriter, r *http.Request) {
 	targetURL, err := url.Parse(fmt.Sprintf("%s%s", h.javaBackendURL, r.RequestURI))
