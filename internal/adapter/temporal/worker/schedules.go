@@ -18,6 +18,11 @@ const (
 
 	OverdueInstallmentScheduleID = "overdue-installment-daily-workflow"
 	overdueInstallmentCron       = "0 6 * * *"
+
+	AccountingSnapshotScheduleID = "accounting-snapshot-daily-workflow"
+	accountingSnapshotCron       = "0 4 * * *"
+
+	pspReconciliationCron = "0 6 * * *"
 )
 
 // ScheduleInitializer creates and upserts Temporal Schedules for periodic workflows.
@@ -156,6 +161,87 @@ func InitOverdueInstallmentSchedule(ctx context.Context, c client.Client) error 
 	slog.InfoContext(ctx, "overdue installment schedule created",
 		"scheduleID", OverdueInstallmentScheduleID,
 		"cron", overdueInstallmentCron,
+	)
+	return nil
+}
+
+// InitAccountingSnapshotSchedule creates the daily accounting snapshot schedule.
+// Cron: "0 4 * * *" (04:00 UTC). Idempotent — skips if already exists.
+func InitAccountingSnapshotSchedule(ctx context.Context, c client.Client) error {
+	scheduleClient := c.ScheduleClient()
+
+	handle := scheduleClient.GetHandle(ctx, AccountingSnapshotScheduleID)
+	if _, err := handle.Describe(ctx); err == nil {
+		slog.InfoContext(ctx, "accounting snapshot schedule already exists",
+			"scheduleID", AccountingSnapshotScheduleID)
+		return nil
+	}
+
+	_, err := scheduleClient.Create(ctx, client.ScheduleOptions{
+		ID: AccountingSnapshotScheduleID,
+		Spec: client.ScheduleSpec{
+			CronExpressions: []string{accountingSnapshotCron},
+		},
+		Action: &client.ScheduleWorkflowAction{
+			Workflow:  temporalworkflow.AccountingSnapshotWorkflow,
+			TaskQueue: AccountingSnapshotQueue,
+			Args:      []any{temporalworkflow.AccountingSnapshotInput{}},
+		},
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "already") {
+			slog.InfoContext(ctx, "accounting snapshot schedule already exists, skipping creation",
+				"scheduleID", AccountingSnapshotScheduleID)
+			return nil
+		}
+		return fmt.Errorf("create accounting snapshot schedule %q: %w", AccountingSnapshotScheduleID, err)
+	}
+
+	slog.InfoContext(ctx, "accounting snapshot schedule created",
+		"scheduleID", AccountingSnapshotScheduleID,
+		"cron", accountingSnapshotCron,
+		"queue", AccountingSnapshotQueue,
+	)
+	return nil
+}
+
+// InitPspReconciliationSchedule creates the daily PSP reconciliation schedule.
+// Cron: "0 6 * * *" (06:00 UTC). Idempotent — skips if already exists.
+func InitPspReconciliationSchedule(ctx context.Context, c client.Client) error {
+	scheduleID := temporalworkflow.PspReconciliationScheduledID
+	scheduleClient := c.ScheduleClient()
+
+	handle := scheduleClient.GetHandle(ctx, scheduleID)
+	if _, err := handle.Describe(ctx); err == nil {
+		slog.InfoContext(ctx, "psp reconciliation schedule already exists",
+			"scheduleID", scheduleID)
+		return nil
+	}
+
+	_, err := scheduleClient.Create(ctx, client.ScheduleOptions{
+		ID: scheduleID,
+		Spec: client.ScheduleSpec{
+			CronExpressions: []string{pspReconciliationCron},
+		},
+		Action: &client.ScheduleWorkflowAction{
+			Workflow:  temporalworkflow.PspReconciliationWorkflow,
+			TaskQueue: PspReconciliationQueue,
+			Args:      []any{temporalworkflow.PspReconciliationInput{ScopeID: "global"}},
+		},
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "already") {
+			slog.InfoContext(ctx, "psp reconciliation schedule already exists, skipping creation",
+				"scheduleID", scheduleID)
+			return nil
+		}
+		return fmt.Errorf("create psp reconciliation schedule %q: %w", scheduleID, err)
+	}
+
+	slog.InfoContext(ctx, "psp reconciliation schedule created",
+		"scheduleID", scheduleID,
+		"cron", pspReconciliationCron,
+		"queue", PspReconciliationQueue,
 	)
 	return nil
 }

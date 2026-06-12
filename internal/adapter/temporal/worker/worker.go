@@ -72,3 +72,34 @@ func (r *Registry) RegisterOverdueInstallmentWorker(acts *temporalactivity.Overd
 	w.RegisterWorkflow(temporalworkflow.OverdueInstallmentWorkflow)
 	w.RegisterActivity(acts)
 }
+
+// ParticipantRecalculationQueue is the Temporal task queue for participant recalculation workers.
+const ParticipantRecalculationQueue = "PARTICIPANT_RECALCULATION_QUEUE"
+
+// RegisterParticipantRecalculationWorker registers the ParticipantRecalculation
+// workflow and its activities.
+func (r *Registry) RegisterParticipantRecalculationWorker(acts *temporalactivity.ParticipantRecalculationActivities) {
+	w := r.NewWorker(ParticipantRecalculationQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.ParticipantRecalculationWorkflow)
+	w.RegisterActivity(acts)
+}
+
+// AccountingSnapshotQueue is the Temporal task queue for accounting snapshot workers.
+const AccountingSnapshotQueue = "ACCOUNTING_SNAPSHOT_QUEUE"
+
+// RegisterAccountingSnapshotWorker registers the AccountingSnapshot workflow and its activities.
+func (r *Registry) RegisterAccountingSnapshotWorker(acts *temporalactivity.AccountingSnapshotActivities) {
+	w := r.NewWorker(AccountingSnapshotQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.AccountingSnapshotWorkflow)
+	w.RegisterActivity(acts)
+}
+
+// PspReconciliationQueue is the Temporal task queue for PSP reconciliation workers.
+const PspReconciliationQueue = "PSP_RECONCILIATION_QUEUE"
+
+// RegisterPspReconciliationWorker registers the PspReconciliation workflow and its activities.
+func (r *Registry) RegisterPspReconciliationWorker(acts *temporalactivity.PspReconciliationActivities) {
+	w := r.NewWorker(PspReconciliationQueue, sdkworker.Options{})
+	w.RegisterWorkflow(temporalworkflow.PspReconciliationWorkflow)
+	w.RegisterActivity(acts)
+}
