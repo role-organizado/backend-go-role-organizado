@@ -46,6 +46,7 @@ import (
 	portout "github.com/role-organizado/backend-go-role-organizado/internal/port/out"
 	// Phase 5b: Finance hexagonal
 	ucfinance "github.com/role-organizado/backend-go-role-organizado/internal/usecase/finance"
+	ucaccounting "github.com/role-organizado/backend-go-role-organizado/internal/usecase/accounting"
 	// Phase 6
 	ucnotification "github.com/role-organizado/backend-go-role-organizado/internal/usecase/notification"
 	// Phase 6b: Notification Templates
@@ -167,6 +168,10 @@ func main() {
 	}
 	if err := migrations.RunV087CreateOutboundIndexes(ctx, mongoClient.DB()); err != nil {
 		slog.Error("migration v087 failed", "error", err)
+		os.Exit(1)
+	}
+	if err := migrations.RunV089CreateAccountingSnapshots(ctx, mongoClient.DB()); err != nil {
+		slog.Error("migration v089 failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -573,6 +578,24 @@ func main() {
 		overdueActs := temporalactivity.NewOverdueInstallmentActivities(findMarkUC, dispatchUC)
 		temporalRegistry.RegisterOverdueInstallmentWorker(overdueActs)
 
+		// --- Temporal Onda 2: ParticipantRecalculation (native Go) ---
+		financeInstallmentRepoEarly := mongodb.NewFinanceInstallmentRepository(mongoClient)
+		recalcFinanceUC := ucfinance.NewRecalculateFinanceSummary(
+			financeSummaryRepoEarly, rateioRepo, financeInstallmentRepoEarly,
+		)
+		participantRecalcActs := temporalactivity.NewParticipantRecalculationActivities(recalcFinanceUC)
+		temporalRegistry.RegisterParticipantRecalculationWorker(participantRecalcActs)
+
+		// --- Temporal Onda 2: AccountingSnapshot (native Go) ---
+		accountingSnapshotRepo := mongodb.NewAccountingSnapshotRepository(mongoClient)
+		generateSnapshotUC := ucaccounting.NewGenerateSnapshot(accountingSnapshotRepo)
+		accountingSnapshotActs := temporalactivity.NewAccountingSnapshotActivities(generateSnapshotUC)
+		temporalRegistry.RegisterAccountingSnapshotWorker(accountingSnapshotActs)
+
+		// --- Temporal Onda 2: PspReconciliation (reuses reconcile UC + report repo) ---
+		pspReconActs := temporalactivity.NewPspReconciliationActivities(reconcileUC, reconcileReportRepo)
+		temporalRegistry.RegisterPspReconciliationWorker(pspReconActs)
+
 		if startErr := temporalRegistry.Start(); startErr != nil {
 			slog.Error("failed to start Temporal workers", "error", startErr)
 			os.Exit(1)
@@ -589,6 +612,12 @@ func main() {
 		}
 		if schedErr := temporalworker.InitOverdueInstallmentSchedule(schedCtx, temporalClient); schedErr != nil {
 			slog.Warn("overdue-installment schedule init failed", "error", schedErr)
+		}
+		if schedErr := temporalworker.InitAccountingSnapshotSchedule(schedCtx, temporalClient); schedErr != nil {
+			slog.Warn("accounting-snapshot schedule init failed", "error", schedErr)
+		}
+		if schedErr := temporalworker.InitPspReconciliationSchedule(schedCtx, temporalClient); schedErr != nil {
+			slog.Warn("psp-reconciliation schedule init failed", "error", schedErr)
 		}
 
 		slog.Info("temporal workers started",
