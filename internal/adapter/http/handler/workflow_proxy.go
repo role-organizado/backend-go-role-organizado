@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/role-organizado/backend-go-role-organizado/internal/adapter/http/middleware"
 )
 
 // WorkflowProxyHandler proxies Temporal workflow status/control requests to the Java backend.
@@ -34,6 +36,9 @@ func NewWorkflowProxyHandler(javaBackendURL string) *WorkflowProxyHandler {
 // These routes map 1:1 to the Java backend endpoints.
 func (h *WorkflowProxyHandler) RegisterWorkflowRoutes(r chi.Router) {
 	r.Route("/api/v1/workflows", func(r chi.Router) {
+		// Root listing endpoint — proxied to the Java backend.
+		r.Get("/", h.proxy)
+
 		// E1 — Participant lifecycle workflow status
 		r.Get("/participant/{participantId}/status", h.proxy)
 
@@ -58,8 +63,14 @@ func (h *WorkflowProxyHandler) RegisterWorkflowRoutes(r chi.Router) {
 // AdminReconciliationWorkflow) to the Java backend. These start/signal/query
 // live Temporal workflows, which the Go service's Noop starters cannot fulfil —
 // proxying is the correct treatment during the Strangler-Fig migration.
+// All routes under this prefix require the ADMIN or MODERATOR role.
 func (h *WorkflowProxyHandler) RegisterAdminWorkflowRoutes(r chi.Router) {
 	r.Route("/api/v1/admin/workflows", func(r chi.Router) {
+		r.Use(middleware.RequireAnyRole("ADMIN", "MODERATOR"))
+
+		// Root listing endpoint — proxied to the Java backend.
+		r.Get("/", h.proxy)
+
 		// AdminAccountingSnapshotController
 		r.Post("/accounting/snapshot/trigger", h.proxy)
 		r.Get("/accounting/snapshot/{workflowId}/status", h.proxy)
