@@ -4,6 +4,7 @@
 package jwt
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,14 +13,38 @@ import (
 	gojwt "github.com/golang-jwt/jwt/v5"
 )
 
+// StringOrSlice is a []string that also unmarshals from a bare JSON string.
+// The Java backend issues tokens where the "roles" claim is a single string
+// (e.g. "USER") rather than an array, so this type accepts both forms to keep
+// tokens cross-backend compatible during the migration.
+type StringOrSlice []string
+
+// UnmarshalJSON accepts either a JSON array of strings or a single JSON string.
+// A single string is normalised to a one-element slice.
+func (s *StringOrSlice) UnmarshalJSON(data []byte) error {
+	// Try a []string first (the form Go itself emits).
+	var arr []string
+	if err := json.Unmarshal(data, &arr); err == nil {
+		*s = arr
+		return nil
+	}
+	// Fall back to a single string (the form the Java backend emits).
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return fmt.Errorf("roles claim is neither a string nor a string array: %w", err)
+	}
+	*s = StringOrSlice{str}
+	return nil
+}
+
 // Claims holds the JWT payload matching the Java backend's token structure.
 // Fields must match exactly to ensure cross-backend token compatibility.
 type Claims struct {
-	Sub      string   `json:"sub"`      // User ID (MongoDB ObjectId string)
-	Email    string   `json:"email"`
-	Nome     string   `json:"nome"`
-	Telefone string   `json:"telefone,omitempty"`
-	Roles    []string `json:"roles"`    // e.g. ["USER", "ADMIN"]
+	Sub      string        `json:"sub"` // User ID (MongoDB ObjectId string)
+	Email    string        `json:"email"`
+	Nome     string        `json:"nome"`
+	Telefone string        `json:"telefone,omitempty"`
+	Roles    StringOrSlice `json:"roles"` // accepts "USER" or ["USER", "ADMIN"]
 	gojwt.RegisteredClaims
 }
 

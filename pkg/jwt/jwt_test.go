@@ -1,6 +1,7 @@
 package jwt_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -38,7 +39,37 @@ func TestGenerateAndValidateAccessToken(t *testing.T) {
 	assert.Equal(t, "joao@example.com", claims.Email)
 	assert.Equal(t, "João Silva", claims.Nome)
 	assert.Equal(t, "+5511999999999", claims.Telefone)
-	assert.Equal(t, []string{"USER"}, claims.Roles)
+	assert.Equal(t, jwt.StringOrSlice{"USER"}, claims.Roles)
+}
+
+// TestClaims_RolesUnmarshal verifies the roles claim parses whether the issuer
+// emits a single string (Java backend) or a JSON array (Go backend).
+func TestClaims_RolesUnmarshal(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want jwt.StringOrSlice
+	}{
+		{"single string (Java)", `{"roles":"USER"}`, jwt.StringOrSlice{"USER"}},
+		{"array (Go)", `{"roles":["USER"]}`, jwt.StringOrSlice{"USER"}},
+		{"multi-element array", `{"roles":["USER","ADMIN"]}`, jwt.StringOrSlice{"USER", "ADMIN"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var c jwt.Claims
+			err := json.Unmarshal([]byte(tt.raw), &c)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, c.Roles)
+		})
+	}
+}
+
+func TestClaims_RolesUnmarshal_Invalid(t *testing.T) {
+	var c jwt.Claims
+	// A number is neither a string nor a string array.
+	err := json.Unmarshal([]byte(`{"roles":42}`), &c)
+	assert.Error(t, err)
 }
 
 func TestGenerateTokenPair(t *testing.T) {
