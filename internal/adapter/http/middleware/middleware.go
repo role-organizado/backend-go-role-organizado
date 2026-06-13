@@ -133,6 +133,33 @@ func RequireRole(role string) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireAnyRole returns a middleware that requires the authenticated user to have
+// at least one of the given roles. Must be used after JWTAuth.
+func RequireAnyRole(roles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(contextKeyClaims).(*pkgjwt.Claims)
+			if !ok || claims == nil {
+				writeError(w, apierr.Unauthorized("unauthenticated"))
+				return
+			}
+			for _, role := range roles {
+				if claims.HasRole(role) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			writeError(w, apierr.Forbidden("one of roles "+strings.Join(roles, ", ")+" required"))
+		})
+	}
+}
+
+// WithClaimsContext injects JWT claims into ctx. Primarily used in tests to
+// simulate an authenticated request without a full JWT stack.
+func WithClaimsContext(ctx context.Context, claims *pkgjwt.Claims) context.Context {
+	return context.WithValue(ctx, contextKeyClaims, claims)
+}
+
 // UserIDFromContext extracts the authenticated user ID from the request context.
 // Returns empty string if not authenticated.
 func UserIDFromContext(ctx context.Context) string {
